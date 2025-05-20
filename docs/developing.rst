@@ -79,10 +79,31 @@ manually.
 Anyway, there is a script to automate this:
 
 .. literalinclude:: ../new_release.sh
-   :language: bash
+  :language: bash
+
+Debugging
+----------------
+
+From the pynng repo directory, install it with:
+
+.. code-block:: bash
+
+   pip install -vvvv --no-cache --no-binary :all: --only-binary scikit-build-core -e '.[dev]'
+
+This will build all C extensions and libraries with debug symbols. You can then
+debug the C code using gdb or lldb. The following instructions are for
+VS Code and lldb:
+
+1. Set a breakpoint in the Python code before the C code you want to debug would be called.
+2. Run the Python code via debugger. You can use the `Python: Current File` launch
+   configuration in VS Code or the VS Code test runner's debug mode.
+3. When the breakpoint is hit, launch the ``Attach (lldb)`` configuration in VS Code and
+   select the process from the list. It may not be clear which process to select, so you may
+   launch concurrent debuggers for all matching processes.
+5. You should now be able to step through the C code in the debugger when you release the Python
+   breakpoint.
 
 .. _cibuildwheel options: https://cibuildwheel.readthedocs.io/en/stable/options/
 .. _mbedtls: https://github.com/Mbed-TLS/mbedtls
 .. _nektos/act: https://github.com/nektos/act
 .. _nng: https://github.com/nanomsg/nng
-

@@ -1,13 +1,10 @@
 [project]
 name = "pynng"
-authors = [
-    {name = "Cody Piersall", email = "cody.piersall@gmail.com"},
-]
+authors = [{ name = "Cody Piersall", email = "cody.piersall@gmail.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: AsyncIO",
     "Framework :: Trio",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.6",
@@ -18,12 +15,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Topic :: System :: Networking",
 ]
-dependencies = [
-    "cffi",
-    "sniffio",
-]
+dependencies = ["cffi", "sniffio"]
 description = "Networking made simply using nng"
-license = {file = "LICENSE.txt"}
+license = { text = "MIT" }
 dynamic = ["version"]
 keywords = [
     "networking",
@@ -36,50 +30,48 @@ keywords = [
     "asyncio",
 ]
 readme = "README.md"
+requires-python = ">=3.6"
 
 [project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-trio",
-    "trio",
-]
-
-docs = [
-    "sphinx",
-    "sphinx-rtd-theme",
-    "sphinxcontrib-trio",
-]
+dev = ["pytest", "pytest-asyncio", "pytest-trio", "trio"]
+docs = ["sphinx", "sphinx-rtd-theme", "sphinxcontrib-trio"]
 
 [project.urls]
 Homepage = "https://github.com/codypiersall/pynng"
 Source = "https://github.com/codypiersall/pynng"
 Documentation = "https://pynng.readthedocs.io/en/latest/"
 
-[tool.setuptools.dynamic]
-version = {attr = "pynng._version.__version__"}
-[tool.setuptools.packages.find]
-include = ["pynng"]
-
 [build-system]
-build-backend = "setuptools.build_meta"
+build-backend = "scikit_build_core.build"
 requires = [
-    "setuptools",
-    "setuptools-scm",
+    "scikit-build-core>=0.8.0",
     "cffi",
-    "cmake",
-    "build",
-    "wheel",
+    "cffi_buildtool",
+    "setuptools-scm",
 ]
+
+[tool.scikit-build]
+wheel.packages = ["pynng"]
+wheel.py-api = "cp36"
+cmake.version = ">=3.18"
+cmake.verbose = true
+minimum-version = "0.8.0"
+build-dir = "./build/{cache_tag}"
+cmake.define = { "CMAKE_POSITION_INDEPENDENT_CODE" = "ON" }
+# cmake.build-type = "Release"
+cmake.build-type = "Debug" # Uncomment for a debug build
+
+# sdist.include = [
+#     "pynng/**/",       # Python source files
+#     "pynng/**/*.so",       # Linux/Unix extension modules
+#     "pynng/**/*.pyd",      # Windows extension modules
+# ]
+
+[tool.setuptools_scm]
+write_to = "pynng/_version.py"
 
 [tool.cibuildwheel]
-test-requires = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-trio",
-    "trio",
-]
-
+test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio"]
 test-command = "pytest {project}/test"
 
 # wheels aren't built correctly for Python 3.6; seems like setuptools doesn't like
@@ -97,13 +89,8 @@ before-build = "bash .github/rmstuff.sh"
 [tool.cibuildwheel.macos]
 # Specify universal2 building for macOS
 archs = ["universal2"]
-environment = { CMAKE_OSX_ARCHITECTURES="x86_64;arm64" }
+environment = { CMAKE_OSX_ARCHITECTURES = "x86_64;arm64" }
 
-[tool.black]
-# Just a placeholder because I have a plugin that won't run without a section in
-# pyproject.toml
-
-# pytest configuration
 [tool.pytest.ini_options]
 addopts = "--capture=no --verbose"
-testpaths = "test"
+testpaths = "test/**/*.py"

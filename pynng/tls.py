@@ -69,8 +69,7 @@ class TLSConfig:
         pynng.check_err(pynng.lib.nng_tls_config_alloc(tls_config_p, mode))
         self._tls_config = tls_config_p[0]
 
-        if server_name:
-            self.set_server_name(server_name)
+        self.set_server_name(server_name)
 
         if ca_string:
             self.set_ca_chain(ca_string)
@@ -95,7 +94,10 @@ class TLSConfig:
         """
         Configure remote server name.
         """
-        server_name_char = pynng.nng.to_char(server_name)
+        if server_name is None:
+            server_name_char = pynng.ffi.NULL
+        else:
+            server_name_char = pynng.nng.to_char(server_name)
         err = pynng.lib.nng_tls_config_server_name(self._tls_config, server_name_char)
         pynng.check_err(err)
 
