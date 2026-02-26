@@ -74,10 +74,8 @@ write_to = "pynng/_version.py"
 test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio"]
 test-command = "pytest {project}/test"
 
-# wheels aren't built correctly for Python 3.6; seems like setuptools doesn't like
-# pyproject.toml for that old Python.
-# pypy3.9 fails on Windows for some reason
-skip = "cp36-* pp39-win_amd64 pp310-win_amd64"
+# https://github.com/python/cpython/issues/127294
+skip = "cp314t-win*"
 
 build-verbosity = 1
 
