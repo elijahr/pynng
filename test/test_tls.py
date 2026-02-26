@@ -1,3 +1,5 @@
+import pytest
+
 from pynng import Pair0, TLSConfig
 
 SERVER_CERT = """
@@ -106,3 +108,39 @@ def test_config_file(tmp_path):
         assert server.recv() == BYTES
         server.send(BYTES)
         assert client.recv() == BYTES
+
+
+def test_tls_config_ca_mutual_exclusion():
+    """Cannot set both ca_string and ca_files"""
+    with pytest.raises(ValueError, match="Cannot set both ca_string and ca_files"):
+        TLSConfig(TLSConfig.MODE_CLIENT, ca_string="cert", ca_files=["file.pem"])
+
+
+def test_tls_config_own_cert_mutual_exclusion():
+    """Cannot set both own_cert_string/own_key_string and cert_key_file"""
+    with pytest.raises(ValueError, match="Cannot set both"):
+        TLSConfig(TLSConfig.MODE_SERVER,
+                  own_cert_string="cert", own_key_string="key",
+                  cert_key_file="file.pem")
+
+
+def test_tls_config_own_cert_both_required():
+    """own_cert_string and own_key_string must both be set or both unset"""
+    with pytest.raises(ValueError, match="must be both set"):
+        TLSConfig(TLSConfig.MODE_SERVER, own_cert_string="cert")
+    with pytest.raises(ValueError, match="must be both set"):
+        TLSConfig(TLSConfig.MODE_SERVER, own_key_string="key")
+
+
+def test_tls_auth_mode():
+    config = TLSConfig(TLSConfig.MODE_CLIENT)
+    # Should not raise
+    config.set_auth_mode(TLSConfig.AUTH_MODE_NONE)
+    config.set_auth_mode(TLSConfig.AUTH_MODE_OPTIONAL)
+    config.set_auth_mode(TLSConfig.AUTH_MODE_REQUIRED)
+
+
+def test_tls_auth_mode_in_constructor():
+    config = TLSConfig(TLSConfig.MODE_CLIENT,
+                       auth_mode=TLSConfig.AUTH_MODE_NONE)
+    assert config is not None

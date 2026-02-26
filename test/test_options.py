@@ -1,3 +1,4 @@
+import pynng
 import pynng.options
 import pytest
 from pathlib import Path
@@ -51,12 +52,20 @@ def test_dial_blocking_behavior():
 
 def test_can_set_recvmaxsize():
     with pynng.Pair1(
-        recv_timeout=50, recv_max_size=100, listen=tcp_addr
-    ) as s0, pynng.Pair1(dial=tcp_addr) as s1:
+        recv_timeout=500, recv_max_size=100, listen=tcp_addr
+    ) as s0, pynng.Pair1(dial=tcp_addr, send_timeout=500) as s1:
+        from _test_util import wait_pipe_len
+
+        wait_pipe_len(s0, 1)
         listener = s0.listeners[0]
-        msg = b"\0" * 101
         assert listener.recv_max_size == s0.recv_max_size
-        s1.send(msg)
+        # Verify right-sized messages get through
+        small_msg = b"\0" * 50
+        s1.send(small_msg)
+        assert s0.recv() == small_msg
+        # Verify oversized messages are dropped
+        big_msg = b"\0" * 101
+        s1.send(big_msg)
         with pytest.raises(pynng.Timeout):
             s0.recv()
 
@@ -105,9 +114,37 @@ def test_resend_time():
     with pynng.Rep0(listen=addr, recv_timeout=3000) as rep, pynng.Req0(
         dial=addr, recv_timeout=3000, resend_time=100
     ) as req:
-        req.send(b"hey i have a question for you")
-        rep.recv()
+        sent = b"hey i have a question for you"
+        req.send(sent)
+        first = rep.recv()
+        assert first == sent
         # if it doesn't resend we'll never receive the second time
-        rep.recv()
-        rep.send(b"well i have an answer")
-        req.recv()
+        second = rep.recv()
+        assert second == sent
+        response = b"well i have an answer"
+        rep.send(response)
+        assert req.recv() == response
+
+
+def test_setopt_rejects_non_integer_float():
+    with pynng.Pair0() as s:
+        with pytest.raises(ValueError):
+            s.recv_timeout = 1.5  # not an integer-like float
+        # But integer-like floats should work
+        s.recv_timeout = 1.0
+        assert s.recv_timeout == 1
+
+
+def test_sockaddr_option_is_readonly():
+    """SockAddrOption has no setter, so writing should raise TypeError."""
+    with pynng.Pair1(recv_timeout=50, listen=tcp_addr) as s0:
+        listener = s0.listeners[0]
+        with pytest.raises(TypeError):
+            listener.local_address = "something"
+
+
+def test_pointer_option_is_writeonly():
+    """PointerOption has no getter, so reading tls_config should raise TypeError."""
+    with pynng.Pair0() as s:
+        with pytest.raises(TypeError):
+            _ = s.tls_config

@@ -1,4 +1,5 @@
 import gc
+import platform
 import time
 
 import pytest
@@ -48,7 +49,7 @@ def test_closing_dialer_works():
     with pynng.Pair0(dial=addr, block_on_dial=False) as s:
         assert len(s.dialers) == 1
         s.dialers[0].close()
-    assert len(s.listeners) == 0
+        assert len(s.dialers) == 0
 
 
 def test_nonblocking_recv_works():
@@ -141,8 +142,10 @@ def test_pair1_polyamorousness():
             assert s2.recv() == b"hello there s2"
 
 
-# ToDo: Check in detail what is going wrong on pp3x-* wheels! Skipping for now.
-@pytest.mark.skip
+@pytest.mark.skipif(
+    platform.python_implementation() == "PyPy",
+    reason="Sub0 topic filtering has issues on PyPy wheels"
+)
 def test_sub_sock_options():
     with pynng.Pub0(listen=addr) as pub:
         # test single option topic
@@ -160,9 +163,87 @@ def test_sub_sock_options():
             assert sub.recv() == b"hello there"
 
 
-# skip because it fails in CI for pypy (all platforms?) and Python 3.7 on Mac.
-# ideal
-@pytest.mark.skip
+def test_send_str_raises_valueerror():
+    with pynng.Pair0(listen="inproc://test-str") as s:
+        with pytest.raises(ValueError, match="Cannot send type str"):
+            s.send("forgot to encode")
+
+
+@pytest.mark.skipif(
+    platform.python_implementation() == "PyPy",
+    reason="PyPy GC does not guarantee __del__ timing"
+)
+def test_socket_del_after_bad_init():
+    # Socket() with no opener should fail but not cause AttributeError in __del__
+    try:
+        pynng.Socket()
+    except Exception:
+        pass
+    gc.collect()  # should not raise
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+def test_context_del_after_socket_close():
+    # Context.__del__ raises Closed when socket is already closed, but must
+    # not SEGFAULT or raise AttributeError
+    s = pynng.Req0()
+    ctx = s.new_context()
+    s.close()
+    del ctx
+    gc.collect()  # should not SEGFAULT
+
+
+@pytest.mark.skipif(
+    platform.python_implementation() == "PyPy",
+    reason="Sub0 topic filtering has issues on PyPy wheels"
+)
+def test_sub_unsubscribe():
+    with pynng.Pub0(listen="inproc://test-unsub") as pub, \
+         pynng.Sub0(dial="inproc://test-unsub", topics="beep", recv_timeout=500) as sub:
+        wait_pipe_len(sub, 1)
+        wait_pipe_len(pub, 1)
+        sub.unsubscribe("beep")
+        pub.send(b"beep should not arrive")
+        with pytest.raises(pynng.Timeout):
+            sub.recv()
+
+
+def test_remove_pipe_callbacks():
+    with pynng.Pair0() as s:
+        cb = lambda pipe: None
+        s.add_pre_pipe_connect_cb(cb)
+        assert len(s._on_pre_pipe_add) == 1
+        s.remove_pre_pipe_connect_cb(cb)
+        assert len(s._on_pre_pipe_add) == 0
+
+        s.add_post_pipe_connect_cb(cb)
+        assert len(s._on_post_pipe_add) == 1
+        s.remove_post_pipe_connect_cb(cb)
+        assert len(s._on_post_pipe_add) == 0
+
+        s.add_post_pipe_remove_cb(cb)
+        assert len(s._on_post_pipe_remove) == 1
+        s.remove_post_pipe_remove_cb(cb)
+        assert len(s._on_post_pipe_remove) == 0
+
+
+def test_nonblocking_recv_msg():
+    with pynng.Pair0(listen="inproc://test-nb-recv-msg") as s:
+        with pytest.raises(pynng.TryAgain):
+            s.recv_msg(block=False)
+
+
+def test_nonblocking_send_msg():
+    with pynng.Pair0(listen="inproc://test-nb-send-msg") as s:
+        msg = pynng.Message(b"will not send")
+        with pytest.raises(pynng.TryAgain):
+            s.send_msg(msg, block=False)
+
+
+@pytest.mark.skipif(
+    platform.python_implementation() == "PyPy",
+    reason="PyPy GC does not guarantee __del__ timing"
+)
 def test_sockets_get_garbage_collected():
     # from issue90
     with pynng.Pub0() as _:
