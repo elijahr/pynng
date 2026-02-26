@@ -69,7 +69,8 @@ class TLSConfig:
         pynng.check_err(pynng.lib.nng_tls_config_alloc(tls_config_p, mode))
         self._tls_config = tls_config_p[0]
 
-        self.set_server_name(server_name)
+        if server_name is not None:
+            self.set_server_name(server_name)
 
         if ca_string:
             self.set_ca_chain(ca_string)

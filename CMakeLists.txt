@@ -24,11 +24,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # ============================================
 
 # Repository URLs and versions
-# set(NNG_REPO "https://github.com/nanomsg/nng" CACHE STRING "URL of the NNG repository")
-# set(NNG_REV "v1.10.1" CACHE STRING "Revision of NNG to use")
-
 set(NNG_REPO "https://github.com/elijahr/nng" CACHE STRING "URL of the NNG repository")
-set(NNG_REV "mbedtls-3.6.3-fix" CACHE STRING "Revision of NNG to use")
+set(NNG_REV "stable-mbedtls-3.6.3-fix" CACHE STRING "Revision of NNG to use")
 
 set(MBEDTLS_REPO "https://github.com/ARMmbed/mbedtls.git" CACHE STRING "URL of the mbedTLS repository")
 set(MBEDTLS_REV "v3.6.3.1" CACHE STRING "Revision of mbedTLS to use")
@@ -147,12 +144,11 @@ set(CFFI_OUTPUT_FILE "${CMAKE_CURRENT_BINARY_DIR}/_nng.c")
 add_custom_command(
   OUTPUT ${CFFI_OUTPUT_FILE}
   COMMAND ${CMAKE_COMMAND} -E echo "Generating CFFI bindings for NNG..."
-  COMMAND ${Python_EXECUTABLE} -m cffi_buildtool exec-python ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py ${CFFI_OUTPUT_FILE} --ffi-var=ffibuilder
+  COMMAND ${CMAKE_COMMAND} -E env "NNG_INCLUDE_DIR=${nng_SOURCE_DIR}/include"
+    ${Python_EXECUTABLE} -m cffi_buildtool exec-python ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py ${CFFI_OUTPUT_FILE} --ffi-var=ffibuilder
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py
   COMMENT "Generating CFFI bindings for NNG"
-  ENVIRONMENT
-    "NNG_INCLUDE_DIR=${nng_SOURCE_DIR}/include"
   VERBATIM
 )
 
