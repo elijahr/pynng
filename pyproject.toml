@@ -47,6 +47,7 @@ requires = [
     "scikit-build-core>=0.8.0",
     "cffi",
     "cffi_buildtool",
+    "cir @ file:///Users/elijahrutschman/Development/cir",
     "setuptools-scm",
 ]
 

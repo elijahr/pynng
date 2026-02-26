@@ -1,188 +1,121 @@
 #!/usr/bin/env python3
 
-# build the pynng interface.
+"""Build the pynng CFFI interface.
 
-from cffi import FFI
+Uses cir's libclang backend to parse NNG C headers into an IR,
+then converts the IR to CFFI cdef strings.
+"""
+
 import os
 import re
-import subprocess
-import datetime
+
+from cir.backends import get_backend
+from cffi import FFI
+
+from cir.writers.cffi import header_to_cffi
 
 NNG_INCLUDE_DIR = os.environ["NNG_INCLUDE_DIR"]
 
+NNG_HEADERS = [
+    "nng/nng.h",
+    "nng/protocol/bus0/bus.h",
+    "nng/protocol/pair0/pair.h",
+    "nng/protocol/pair1/pair.h",
+    "nng/protocol/pipeline0/push.h",
+    "nng/protocol/pipeline0/pull.h",
+    "nng/protocol/pubsub0/pub.h",
+    "nng/protocol/pubsub0/sub.h",
+    "nng/protocol/reqrep0/req.h",
+    "nng/protocol/reqrep0/rep.h",
+    "nng/protocol/survey0/survey.h",
+    "nng/protocol/survey0/respond.h",
+    "nng/supplemental/tls/tls.h",
+    "nng/transport/tls/tls.h",
+]
 
-def process_header(header_path):
-    """Process a header file similar to how the shell script did."""
-    print(f"Processing {header_path}")
+EXCLUDE_PATTERNS = [r"nng_tls_config_(pass|key)"]
 
-    with open(header_path, "r") as f:
+
+def generate_cdef() -> str:
+    """Parse NNG headers and generate CFFI cdef declarations."""
+    # Build umbrella header that includes all existing NNG headers
+    existing = [
+        h for h in NNG_HEADERS if os.path.exists(os.path.join(NNG_INCLUDE_DIR, h))
+    ]
+    includes = "\n".join(f"#include <{h}>" for h in existing)
+    umbrella = f"""\
+#define NNG_DECL
+#define NNG_STATIC_LIB
+#define NNG_DEPRECATED
+{includes}
+"""
+
+    # Parse with cir libclang backend
+    backend = get_backend("libclang")
+    header = backend.parse(
+        umbrella,
+        "umbrella.h",
+        include_dirs=[NNG_INCLUDE_DIR],
+        project_prefixes=(NNG_INCLUDE_DIR,),
+    )
+
+    # Convert IR to CFFI cdef string
+    cdef = header_to_cffi(header, exclude_patterns=EXCLUDE_PATTERNS)
+
+    # Extract additional #define constants from nng.h via regex
+    # (libclang can miss macro values that involve expressions)
+    nng_h_path = os.path.join(NNG_INCLUDE_DIR, "nng/nng.h")
+    extra_defines = _extract_defines(nng_h_path)
+    if extra_defines:
+        cdef = cdef + "\n" + extra_defines
+
+    return cdef
+
+
+def _extract_defines(nng_h_path: str) -> str:
+    """Extract #define constants from nng.h that libclang may not capture."""
+    with open(nng_h_path) as f:
         content = f.read()
 
-    # Remove includes
-    content = re.sub(r"^#include.*$", "", content, flags=re.MULTILINE)
+    defines = []
+    for m in re.finditer(
+        r"^#define\s+(NNG_FLAG_\w+|NNG_\w+_VERSION|NNG_MAXADDRLEN)\b",
+        content,
+        re.MULTILINE,
+    ):
+        name = m.group(1)
+        defines.append(f"#define {name} ...")
 
-    # Use cpp to preprocess the file
-    try:
-        # Write to a temporary file
-        temp_file = f"temp_header_{os.path.basename(header_path)}"
-        with open(temp_file, "w") as f:
-            f.write(content)
-
-        # Run cpp on it
-        cpp_output = subprocess.check_output(
-            ["cpp", "-P", "-Wno-extra-tokens", "-Wno-invalid-pp-token", temp_file],
-            universal_newlines=True,
-            stderr=subprocess.DEVNULL,
-        )
-        os.unlink(temp_file)
-    except (subprocess.SubprocessError, FileNotFoundError):
-        # Fallback if cpp fails or isn't available
-        print("Warning: cpp preprocessing failed, using simplified processing")
-        cpp_output = content
-
-    # Strip preprocessor directives
-    cpp_output = re.sub(r"^#.*$", "", cpp_output, flags=re.MULTILINE)
-
-    # Strip C and C++ comments
-    cpp_output = re.sub(r"/\*.*?\*/", "", cpp_output, flags=re.DOTALL)
-    cpp_output = re.sub(r"//.*$", "", cpp_output, flags=re.MULTILINE)
-
-    # Remove blank lines
-    cpp_output = re.sub(r"^\s*$", "", cpp_output, flags=re.MULTILINE)
-
-    # Remove NNG_DECL
-    cpp_output = re.sub(r"^NNG_DECL\s*", "", cpp_output, flags=re.MULTILINE)
-
-    # Normalize whitespace
-    result = []
-    for line in cpp_output.splitlines():
-        if line.strip():
-            # Match leading whitespace
-            leading_match = re.match(r"^[ \t]*", line)
-            if leading_match and leading_match.group():
-                leading = "    "  # 4 spaces for indentation
-            else:
-                leading = ""
-
-            # Get the rest of the line and normalize its whitespace
-            rest = line[len(leading_match.group()) :] if leading_match else line
-            rest = re.sub(r"[ \t]+", " ", rest)
-            rest = rest.rstrip()
-
-            result.append(f"{leading}{rest}")
-
-    return "\n".join(result)
+    return "\n".join(defines)
 
 
-# Function to generate nng_api.h from headers
-def generate_api():
-    """
-    Generate NNG API header content from NNG headers.
-    This replaces the functionality of generate_api.sh.
+# Generate cdef content
+cdef_content = generate_cdef()
 
-    Returns:
-        str: The generated API header content
-    """
-    print("Generating nng_api.h content...")
-
-    # Extract NNG version info
-    nng_h_path = f"{NNG_INCLUDE_DIR}/nng/nng.h"
-    with open(nng_h_path, "r") as f:
-        nng_h_content = f.read()
-
-    major = re.search(r"^#define\s+NNG_MAJOR_VERSION\s+(\d+)", nng_h_content, re.MULTILINE).group(1)
-    minor = re.search(r"^#define\s+NNG_MINOR_VERSION\s+(\d+)", nng_h_content, re.MULTILINE).group(1)
-    patch = re.search(r"^#define\s+NNG_PATCH_VERSION\s+(\d+)", nng_h_content, re.MULTILINE).group(1)
-    version = f"{major}.{minor}.{patch}"
-
-    print(f"Processing NNG version {version}")
-
-    # Start building the API content
-    api_content = [
-        f"""// THIS FILE WAS AUTOMATICALLY GENERATED BY build_pynng.py on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-//
-// NNG API Version: {major}.{minor}.{patch}
-//
-// This file contains C declarations for the NNG (nanomsg-next-gen) library.
-// It was generated automatically from the NNG headers.
-//
-// For more information about NNG, see https://nng.nanomsg.org/
-//
+callbacks = """
+    extern "Python" void _async_complete(void *);
+    extern "Python" void _nng_pipe_cb(nng_pipe, nng_pipe_ev, void *);
 """
-    ]
-
-    # Process core NNG header with proper truncation
-    content = process_header(f"{NNG_INCLUDE_DIR}/nng/nng.h")
-    # Truncate content at a specific point like the shell script did
-    # truncated = content.split("extern int nng_msg_getopt")[0]
-    api_content.append(content)
-
-    # # Process protocol headers
-    # proto_headers = [
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/bus0/bus.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/pair0/pair.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/pair1/pair.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/pipeline0/push.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/pipeline0/pull.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/pubsub0/pub.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/pubsub0/sub.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/reqrep0/req.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/reqrep0/rep.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/survey0/survey.h",
-    #     f"{NNG_INCLUDE_DIR}/nng/protocol/survey0/respond.h",
-    # ]
-
-    # for proto in proto_headers:
-    #     api_content.append(process_header(proto))
-
-    # Process TLS headers with filtering
-    # tls_content = process_header(f"{NNG_INCLUDE_DIR}/nng/supplemental/tls/tls.h")
-    # Filter out specific lines as the shell script did
-    # filtered_lines = [line for line in tls_content.splitlines() if not re.search(r"nng_tls_config_(pass|key)", line)]
-    # api_content.append("\n".join(filtered_lines))
-
-    # Add transport/tls content
-    # api_content.append(process_header(f"{NNG_INCLUDE_DIR}/nng/transport/tls/tls.h"))
-
-    # Add important defines
-    with open(f"{NNG_INCLUDE_DIR}/nng/nng.h", "r") as src:
-        defines = []
-        for line in src:
-            if line.startswith("#define NNG_FLAG") or line.startswith("#define NNG_") and "_VERSION" in line:
-                defines.append(line)
-        api_content.append("".join(defines))
-
-    result = "\n".join(api_content)
-    print(f"Successfully generated API content")
-    return result
-
-
-# Generate API header content
-api_content = generate_api()
 
 ffibuilder = FFI()
 
+# Build set_source includes from the same header list
+_existing_headers = [
+    h for h in NNG_HEADERS if os.path.exists(os.path.join(NNG_INCLUDE_DIR, h))
+]
+_source_includes = "\n".join(f"        #include <{h}>" for h in _existing_headers)
+
 ffibuilder.set_source(
     "pynng._nng",
-    """ // passed to the real C compiler,
-        // contains implementation of things declared in cdef()
+    f"""
         #define NNG_DECL
         #define NNG_STATIC_LIB
-        #include <nng/nng.h>
+{_source_includes}
     """,
-    include_dirs=[f"{NNG_INCLUDE_DIR}"],
+    include_dirs=[NNG_INCLUDE_DIR],
 )
 
-
-callbacks = """
-    // aio callback: https://nanomsg.github.io/nng/man/tip/nng_aio_alloc.3
-    extern "Python" void _async_complete(void *);
-
-    // nng_pipe_notify callback:
-    // https://nanomsg.github.io/nng/man/tip/nng_pipe_notify.3
-    extern "Python" void _nng_pipe_cb(nng_pipe, nng_pipe_ev, void *);
-"""
-ffibuilder.cdef(api_content + callbacks)
+ffibuilder.cdef(cdef_content + callbacks)
 
 if __name__ == "__main__":
     ffibuilder.compile(verbose=True)
