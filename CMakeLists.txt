@@ -202,12 +202,22 @@ else()
     nng
     ${Python_LIBRARIES}
     pthread)
-  if(NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "x86" OR
-          CMAKE_SYSTEM_PROCESSOR MATCHES "i386" OR
-          CMAKE_SYSTEM_PROCESSOR MATCHES "i686" OR
-          (CMAKE_C_COMPILER_ID MATCHES "Clang" AND CMAKE_SYSTEM_NAME MATCHES "Darwin")))
-    target_link_libraries(_nng PRIVATE
-      atomic)
+
+  # Only link -latomic if the compiler actually needs it. Some platforms
+  # (e.g. aarch64) have native atomic instructions and don't ship libatomic,
+  # while others (e.g. 32-bit ARM, RISC-V) need it for 64-bit atomics.
+  # See: https://github.com/codypiersall/pynng/issues/133
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("
+    #include <stdatomic.h>
+    int main(void) {
+      _Atomic long long x = 0;
+      __atomic_fetch_add(&x, 1, __ATOMIC_SEQ_CST);
+      return 0;
+    }
+  " HAVE_ATOMICS_WITHOUT_LIB)
+  if(NOT HAVE_ATOMICS_WITHOUT_LIB)
+    target_link_libraries(_nng PRIVATE atomic)
   endif()
 endif()
 
