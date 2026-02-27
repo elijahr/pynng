@@ -182,15 +182,26 @@ def test_socket_del_after_bad_init():
     gc.collect()  # should not raise
 
 
-@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 def test_context_del_after_socket_close():
-    # Context.__del__ raises Closed when socket is already closed, but must
-    # not SEGFAULT or raise AttributeError
+    # Context.__del__ must silently handle the already-closed case without
+    # raising Closed, AttributeError, or segfaulting.
     s = pynng.Req0()
     ctx = s.new_context()
     s.close()
     del ctx
-    gc.collect()  # should not SEGFAULT
+    gc.collect()  # should not raise or SEGFAULT
+
+
+def test_tls_config_del_after_init_failure():
+    # TLSConfig.__del__ must not raise AttributeError when __init__ fails
+    # before _tls_config is assigned.
+    with pytest.raises(ValueError):
+        pynng.TLSConfig(
+            pynng.TLSConfig.MODE_CLIENT,
+            ca_string="dummy",
+            ca_files=["dummy"],
+        )
+    gc.collect()  # should not raise AttributeError
 
 
 @pytest.mark.skipif(
