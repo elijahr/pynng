@@ -302,7 +302,8 @@ class TestUmbrellaHeader:
             os.environ["NNG_INCLUDE_DIR"] = old
 
     def test_all_existing_headers_are_included(self):
-        from build_pynng import NNG_HEADERS
+        """Verify generate_cdef() output contains types/functions from all NNG headers."""
+        from build_pynng import NNG_HEADERS, generate_cdef
 
         existing = [
             h
@@ -311,16 +312,35 @@ class TestUmbrellaHeader:
         ]
         assert len(existing) > 0, "No NNG headers found"
 
-        # Build the umbrella the same way build_pynng does
-        includes = "\n".join(f"#include <{h}>" for h in existing)
-        umbrella = f"""\
-#define NNG_DECL
-#define NNG_STATIC_LIB
-#define NNG_DEPRECATED
-{includes}
-"""
-        assert "#define NNG_DECL" in umbrella
-        assert "#define NNG_STATIC_LIB" in umbrella
-        assert "#define NNG_DEPRECATED" in umbrella
-        for h in existing:
-            assert f"#include <{h}>" in umbrella
+        # The actual test: verify that generate_cdef() produces output that
+        # includes declarations from across the header set, not just nng.h.
+        cdef = generate_cdef()
+
+        # Core nng.h types
+        assert "nng_socket" in cdef, "Missing nng_socket from nng/nng.h"
+
+        # Protocol-specific openers prove that protocol headers were included
+        protocol_markers = {
+            "nng/protocol/pair0/pair.h": "nng_pair0_open",
+            "nng/protocol/pair1/pair.h": "nng_pair1_open",
+            "nng/protocol/bus0/bus.h": "nng_bus0_open",
+            "nng/protocol/reqrep0/req.h": "nng_req0_open",
+            "nng/protocol/reqrep0/rep.h": "nng_rep0_open",
+            "nng/protocol/pubsub0/pub.h": "nng_pub0_open",
+            "nng/protocol/pubsub0/sub.h": "nng_sub0_open",
+            "nng/protocol/pipeline0/push.h": "nng_push0_open",
+            "nng/protocol/pipeline0/pull.h": "nng_pull0_open",
+            "nng/protocol/survey0/survey.h": "nng_surveyor0_open",
+            "nng/protocol/survey0/respond.h": "nng_respondent0_open",
+        }
+        for header, marker in protocol_markers.items():
+            if header in existing:
+                assert marker in cdef, (
+                    f"Header {header} exists but {marker} missing from cdef"
+                )
+
+        # TLS header inclusion (if present)
+        if "nng/supplemental/tls/tls.h" in existing:
+            assert "nng_tls_config_alloc" in cdef, (
+                "TLS header exists but nng_tls_config_alloc missing from cdef"
+            )

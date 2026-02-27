@@ -103,28 +103,28 @@ def test_abstract_socket_with_special_chars():
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Abstract sockets are Linux-specific"
 )
+@pytest.mark.xfail(
+    raises=pynng.exceptions.InvalidOperation,
+    reason="Auto-bind with empty abstract name not supported in all NNG versions",
+    strict=False,
+)
 def test_abstract_socket_auto_bind():
     """Test abstract socket auto-bind functionality with empty name"""
     # Test with empty abstract socket name for auto-bind
     abstract_addr = "abstract://"
 
     with pynng.Pair0(recv_timeout=100) as sock1, pynng.Pair0(recv_timeout=100) as sock2:
-        try:
-            listener = sock1.listen(abstract_addr)
-            sock2.dial(abstract_addr)
+        listener = sock1.listen(abstract_addr)
+        sock2.dial(abstract_addr)
 
-            # Test communication
-            sock1.send(b"auto-bind test")
-            received = sock2.recv()
-            assert received == b"auto-bind test"
+        # Test communication
+        sock1.send(b"auto-bind test")
+        received = sock2.recv()
+        assert received == b"auto-bind test"
 
-            # Test that the address is properly handled
-            local_addr = listener.local_address
-            assert isinstance(local_addr, pynng.sockaddr.AbstractAddr)
-        except pynng.exceptions.InvalidOperation:
-            # Auto-bind with empty name might not be supported
-            # This is acceptable behavior for some implementations
-            pytest.skip("Auto-bind with empty name not supported")
+        # Test that the address is properly handled
+        local_addr = listener.local_address
+        assert isinstance(local_addr, pynng.sockaddr.AbstractAddr)
 
 
 @pytest.mark.skipif(

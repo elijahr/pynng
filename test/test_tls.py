@@ -134,13 +134,22 @@ def test_tls_config_own_cert_both_required():
 
 def test_tls_auth_mode():
     config = TLSConfig(TLSConfig.MODE_CLIENT)
-    # Should not raise
+    assert isinstance(config, TLSConfig)
+    assert config._tls_config is not None
+    # Each set_auth_mode call should succeed without error on a valid config
     config.set_auth_mode(TLSConfig.AUTH_MODE_NONE)
+    assert config._tls_config is not None, "Config became invalid after AUTH_MODE_NONE"
     config.set_auth_mode(TLSConfig.AUTH_MODE_OPTIONAL)
+    assert config._tls_config is not None, "Config became invalid after AUTH_MODE_OPTIONAL"
     config.set_auth_mode(TLSConfig.AUTH_MODE_REQUIRED)
+    assert config._tls_config is not None, "Config became invalid after AUTH_MODE_REQUIRED"
+    # Verify invalid auth mode raises an exception
+    with pytest.raises(Exception):
+        config.set_auth_mode(-999)
 
 
 def test_tls_auth_mode_in_constructor():
     config = TLSConfig(TLSConfig.MODE_CLIENT,
                        auth_mode=TLSConfig.AUTH_MODE_NONE)
-    assert config is not None
+    assert isinstance(config, TLSConfig)
+    assert config._tls_config is not None, "TLS config pointer not allocated"
