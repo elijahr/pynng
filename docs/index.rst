@@ -12,7 +12,8 @@ feels natural enough to use that you don't think of it as a wrapper, while
 still exposing the power of the underlying library.  It is installable with
 pip on all major platforms (Linux, Windows, macOS).  It has first class support
 for `Trio`_ and :mod:`asyncio`, in addition to being able to be used
-synchronously.
+synchronously.  Sockets support ``async with``, ``async for``, and other
+modern Python async patterns out of the box.
 
 nng is an
 implementation of the `Scalability Protocols`_; it is the spiritual successor
@@ -76,7 +77,7 @@ On Linux, Windows, and macOS, a quick
 
    pip3 install pynng
 
-should do the trick.  pynng works on Python 3.6+.
+should do the trick.  pynng works on Python 3.9+.
 
 
 Getting Started

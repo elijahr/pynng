@@ -6,33 +6,20 @@ A list of notes, useful only to developers of the library, and not for users.
 Testing without pulling dependencies from GitHub
 ------------------------------------------------
 
-It can lower feedback speed dramatically when testing pynng, and needing to clone
-`nng`_ and `mbedtls`_ from GitHub. If you are just doing this
-one time, it is not terrible, but when you're working on *how pynng is built* it is
-tedious and painful to wait for a slow internet connection.  This can be mitigated by
-cloning nng and mbedtls outside of this repository, running a git server, and pointing
-the ``setup.cfg`` script to
+By default, CMake's ``FetchContent`` downloads NNG and mbedTLS from GitHub during
+the build. To speed up development iteration, you can point the build to local
+clones instead by passing CMake defines:
 
 .. code-block:: bash
 
-   # clone *once* locally
-   git clone https://github.com/nanomsg/nng ~/pynng-deps/nanomsg/nng
-   git clone https://github.com/Mbed-TLS/mbedtls ~/pynng-deps/Mbed-TLS/mbedtls
-   # start a git daemon in the parent directory
-   git daemon --reuseaddr --base-path="$HOME/pynng-deps" --export-all
+   # Clone once locally
+   git clone https://github.com/nanomsg/nng ~/deps/nng
+   git clone https://github.com/Mbed-TLS/mbedtls ~/deps/mbedtls
 
-Then change the ``setup.cfg`` to point to the local git server. Change the ``repo``
-lines from ``repo=https://github.com/nanomsg/nng`` to
-``repo=git://127.0.0.1:/nanomsg/nng``. The relevant sections of the file will look like
-this:
-
-.. code-block:: cfg
-
-   [build_nng]
-   repo=git://127.0.0.1:/nanomsg/nng
-
-   [build_mbedtls]
-   repo=git://127.0.0.1:/Mbed-TLS/mbedtls
+   # Build with local sources via CMake defines
+   pip install -e . \
+     -C cmake.define.FETCHCONTENT_SOURCE_DIR_NNG=$HOME/deps/nng \
+     -C cmake.define.FETCHCONTENT_SOURCE_DIR_MBEDTLS=$HOME/deps/mbedtls
 
 Testing CI changes
 ------------------
@@ -54,12 +41,12 @@ Use this command to run Github Actions locally using the `nektos/act`_ tool
 
 .. code-block:: bash
 
-   # run cibuildwheel, using ubuntu-20.04 image
+   # run cibuildwheel, using ubuntu-24.04 image
    # This is how  you test on Linux
    # Needs --container-options='-u root' so cibuildwheel can launch its own docker containers
    act --container-options='-u root' \
        -W .github/workflows/cibuildwheel.yml \
-       --matrix os:ubuntu-20.04 \
+       --matrix os:ubuntu-24.04 \
        --pull=false \
        --artifact-server-path=artifacts
 
@@ -71,7 +58,7 @@ Making a new release
 --------------------
 
 We use setuptools_scm to properly version the project, and GitHub Actions to build
-wheels.
+wheels via cibuildwheel.
 
 1. Tag the commit locally, and push
 
@@ -80,9 +67,10 @@ wheels.
        git tag vx.y.z -m "Release version x.y.z."
        git push --tags
 
-2. Navigate to the job through GitHub
-3. Download the artifacts, and unzip them all to a directory ``pynng-x.y.z``
-4. Use twine to push all the artifacts
+2. GitHub Actions will automatically build wheels for all supported platforms
+   using cibuildwheel.
+3. Navigate to the job through GitHub and download the artifacts.
+4. Optionally, use twine to manually upload the artifacts to PyPI:
 
    .. code-block:: bash
 
@@ -95,7 +83,10 @@ From the pynng repo directory, install it with:
 
 .. code-block:: bash
 
-   pip install -vvvv --no-cache --no-binary :all: --only-binary scikit-build-core -e '.[dev]'
+   uv pip install -v -e '.[dev]'
+
+To get a debug build, change ``cmake.build-type`` from ``"Release"`` to ``"Debug"``
+in ``pyproject.toml``.
 
 This will build all C extensions and libraries with debug symbols. You can then
 debug the C code using gdb or lldb. The following instructions are for

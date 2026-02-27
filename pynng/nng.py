@@ -509,6 +509,26 @@ class Socket:
     def __exit__(self, *tb_info):
         self.close()
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *tb_info):
+        self.close()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return await self.arecv()
+        except pynng.Closed:
+            raise StopAsyncIteration
+
+    async def aclose(self):
+        """Asynchronous close. Delegates to the synchronous :meth:`close`
+        since the underlying NNG close operation is non-blocking."""
+        self.close()
+
     @property
     def dialers(self):
         """A list of the active dialers"""
@@ -1283,13 +1303,36 @@ class Context:
     def __exit__(self, *exc_info):
         self.close()
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        self.close()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return await self.arecv()
+        except pynng.Closed:
+            raise StopAsyncIteration
+
+    async def aclose(self):
+        """Asynchronous close. Delegates to the synchronous :meth:`close`
+        since the underlying NNG close operation is non-blocking."""
+        self.close()
+
     @property
     def context(self):
         """Return the underlying nng object."""
         return self._context[0]
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except pynng.exceptions.Closed:
+            pass
 
     async def asend_msg(self, msg):
         """

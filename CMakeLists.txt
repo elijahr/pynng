@@ -19,6 +19,23 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 # Enable position independent code
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Work around a bug in llvm-ranlib (all known versions as of LLVM 21.x) where
+# it produces GNU ar format symbol tables when adding a symbol table to an
+# archive with no exported symbols. CMake uses `ar qc` (no symbol table) then
+# `ranlib` as separate steps, which triggers this: llvm-ranlib writes a GNU '/'
+# entry instead of BSD '__.SYMDEF', and Apple's ld rejects it with:
+#   ld: archive member '/' not a mach-o file
+# This affects mbedTLS's libeverest.a and libp256m.a (zero exported symbols).
+# The compiler and ar work fine; only ranlib is broken.
+# See: https://github.com/llvm/llvm-project/issues/98997
+if(APPLE AND CMAKE_RANLIB MATCHES "llvm-ranlib")
+  find_program(_APPLE_RANLIB ranlib PATHS /usr/bin NO_DEFAULT_PATH)
+  if(_APPLE_RANLIB)
+    message(STATUS "Overriding llvm-ranlib with ${_APPLE_RANLIB} to avoid GNU archive format bug")
+    set(CMAKE_RANLIB "${_APPLE_RANLIB}" CACHE FILEPATH "Ranlib" FORCE)
+  endif()
+endif()
+
 # ============================================
 # Dependencies Configuration
 # ============================================
@@ -44,6 +61,7 @@ set(INSTALL_MBEDTLS OFF CACHE BOOL "Install mbedTLS" FORCE)
 set(USE_STATIC_MBEDTLS_LIBRARY ON CACHE BOOL "Use static mbedtls libraries" FORCE)
 set(USE_SHARED_MBEDTLS_LIBRARY OFF CACHE BOOL "Don't use shared mbedtls libraries" FORCE)
 set(LINK_WITH_PTHREAD OFF CACHE BOOL "Don't link mbedtls with pthread" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "Don't treat warnings as errors in mbedTLS" FORCE)
 
 # Download mbedTLS
 FetchContent_Declare(

@@ -16,11 +16,67 @@ The Socket
     should instantiate one of the :ref:`subclasses <available-protocols>`.
 
 .. autoclass:: pynng.Socket(*, listen=None, dial=None, **kwargs)
-   :members: listen, dial, send, recv, asend, arecv, recv_msg, arecv_msg, new_context
+   :members: listen, dial, send, recv, asend, arecv, recv_msg, arecv_msg, new_context, aclose
 
 Feel free to peruse the `examples online
 <https://github.com/codypiersall/pynng/tree/master/examples>`_, or ask in the
 `gitter channel <https://gitter.im/nanomsg/nanomsg>`_.
+
+.. _async-ergonomics:
+
+--------------------
+Async Ergonomics
+--------------------
+
+Both :class:`~pynng.Socket` and :class:`~pynng.Context` support modern Python
+async patterns, making it natural to use pynng in async code with either
+`Trio`_ or :mod:`asyncio`.
+
+Async Context Manager (``async with``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Sockets and Contexts can be used as async context managers, mirroring the
+synchronous ``with`` statement. The socket or context is automatically closed
+when the block exits:
+
+.. literalinclude:: snippets/async_with_example.py
+   :language: python
+
+This is equivalent to the synchronous ``with pynng.Pair0(...) as s:`` pattern,
+but suitable for use inside ``async def`` functions.
+
+Async Iteration (``async for``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Sockets and Contexts support async iteration, enabling a clean loop over
+incoming messages. Internally, each iteration calls :meth:`~pynng.Socket.arecv`
+and stops when the socket is closed (by catching :class:`~pynng.Closed` and
+raising ``StopAsyncIteration``):
+
+Using Trio:
+
+.. literalinclude:: snippets/async_for_example.py
+   :language: python
+
+Using asyncio:
+
+.. literalinclude:: snippets/async_for_asyncio_example.py
+   :language: python
+
+.. note::
+
+   When the socket is closed (or the ``recv_timeout`` expires), the
+   ``async for`` loop exits cleanly instead of raising an exception. This makes
+   it safe to use in tasks that are cancelled externally.
+
+Async Close (``aclose()``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Both :class:`~pynng.Socket` and :class:`~pynng.Context` provide an
+:meth:`~pynng.Socket.aclose` method for consistency with Python's async
+resource management conventions (e.g., ``aclose()`` on async generators).
+It delegates to the synchronous :meth:`~pynng.Socket.close` since the
+underlying NNG close operation is non-blocking.
 
 .. _available-protocols :
 
@@ -53,7 +109,7 @@ Context
 -------
 
 .. autoclass:: pynng.Context(...)
-   :members: send, asend, recv, arecv, recv_msg, arecv_msg, close
+   :members: send, asend, recv, arecv, recv_msg, arecv_msg, close, aclose
 
 -------
 Message
@@ -152,3 +208,5 @@ The name assigned can be retrieved using the ``NNG_OPT_LOCADDR`` option.
         # dialer = sock.dial("abstract://my_test_socket")
 
 For a complete example, see :doc:`../examples/abstract`.
+
+.. _Trio: https://trio.readthedocs.io

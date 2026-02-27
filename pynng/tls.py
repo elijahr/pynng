@@ -50,6 +50,7 @@ class TLSConfig:
         cert_key_file=None,
         passwd=None,
     ):
+        self._tls_config = None
         if ca_string and ca_files:
             raise ValueError("Cannot set both ca_string and ca_files!")
 
@@ -89,7 +90,8 @@ class TLSConfig:
             self.set_cert_key_file(cert_key_file, passwd)
 
     def __del__(self):
-        pynng.lib.nng_tls_config_free(self._tls_config)
+        if self._tls_config is not None:
+            pynng.lib.nng_tls_config_free(self._tls_config)
 
     def set_server_name(self, server_name):
         """

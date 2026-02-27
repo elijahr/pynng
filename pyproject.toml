@@ -2,20 +2,21 @@
 name = "pynng"
 authors = [{ name = "Cody Piersall", email = "cody.piersall@gmail.com" }]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Framework :: AsyncIO",
     "Framework :: Trio",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries",
     "Topic :: System :: Networking",
 ]
-dependencies = ["cffi", "sniffio"]
+dependencies = ["cffi>=1.15.0", "sniffio>=1.3.0"]
 description = "Networking made simply using nng"
 license = { text = "MIT" }
 dynamic = ["version"]
@@ -30,10 +31,10 @@ keywords = [
     "asyncio",
 ]
 readme = "README.md"
-requires-python = ">=3.6"
+requires-python = ">=3.9"
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "pytest-trio", "trio"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-trio>=0.8.0", "trio>=0.22.0"]
 docs = ["sphinx", "sphinx-rtd-theme", "sphinxcontrib-trio"]
 
 [project.urls]
@@ -53,14 +54,13 @@ requires = [
 
 [tool.scikit-build]
 wheel.packages = ["pynng"]
-wheel.py-api = "cp36"
+wheel.py-api = "cp39"
 cmake.version = ">=3.18"
 cmake.verbose = true
 minimum-version = "0.8.0"
 build-dir = "./build/{cache_tag}"
 cmake.define = { "CMAKE_POSITION_INDEPENDENT_CODE" = "ON" }
-# cmake.build-type = "Release"
-cmake.build-type = "Debug" # Uncomment for a debug build
+cmake.build-type = "Release"
 
 # sdist.include = [
 #     "pynng/**/",       # Python source files
@@ -80,10 +80,13 @@ skip = "cp314t-win*"
 
 build-verbosity = 1
 
+[tool.cibuildwheel.linux]
+before-build = "yum install -y clang-devel || apt-get install -y libclang-dev || apk add clang-dev || true"
+
 [tool.cibuildwheel.windows]
 # Windows builds fail because they try to use the same directory for different
 # architectures, and that's no good.
-before-build = "bash .github/rmstuff.sh"
+before-build = "choco install llvm -y && bash .github/rmstuff.sh"
 
 [tool.cibuildwheel.macos]
 # Specify universal2 building for macOS
