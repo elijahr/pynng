@@ -83,12 +83,12 @@ build-verbosity = 1
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-before-build = "dnf install -y clang-devel || apt-get install -y libclang-dev || apk add clang-dev || true"
+before-build = "pip install clangir && python -m clangir.install_libclang --skip-verify"
 
 [tool.cibuildwheel.windows]
 # Windows builds fail because they try to use the same directory for different
 # architectures, and that's no good.
-before-build = "bash .github/install-llvm-windows.sh && bash .github/rmstuff.sh"
+before-build = "pip install clangir && python -m clangir.install_libclang --skip-verify && bash .github/rmstuff.sh"
 environment = { PATH = "C:\\Program Files\\LLVM\\bin;$PATH" }
 
 [tool.cibuildwheel.macos]
