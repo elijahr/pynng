@@ -54,7 +54,7 @@ requires = [
 
 [tool.scikit-build]
 wheel.packages = ["pynng"]
-wheel.py-api = "cp39"
+wheel.py-api = "cp310"
 cmake.version = ">=3.18"
 cmake.verbose = true
 minimum-version = "0.8.0"
@@ -81,12 +81,15 @@ skip = "cp314t-win*"
 build-verbosity = 1
 
 [tool.cibuildwheel.linux]
-before-build = "yum install -y clang-devel || apt-get install -y libclang-dev || apk add clang-dev || true"
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+before-build = "dnf install -y clang-devel || apt-get install -y libclang-dev || apk add clang-dev || true"
 
 [tool.cibuildwheel.windows]
 # Windows builds fail because they try to use the same directory for different
 # architectures, and that's no good.
 before-build = "choco install llvm -y && bash .github/rmstuff.sh"
+environment = { PATH = "C:\\Program Files\\LLVM\\bin;$PATH" }
 
 [tool.cibuildwheel.macos]
 # Specify universal2 building for macOS
