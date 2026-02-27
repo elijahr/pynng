@@ -88,7 +88,7 @@ before-build = "dnf install -y clang-devel || apt-get install -y libclang-dev ||
 [tool.cibuildwheel.windows]
 # Windows builds fail because they try to use the same directory for different
 # architectures, and that's no good.
-before-build = "choco install llvm -y && bash .github/rmstuff.sh"
+before-build = "bash .github/install-llvm-windows.sh && bash .github/rmstuff.sh"
 environment = { PATH = "C:\\Program Files\\LLVM\\bin;$PATH" }
 
 [tool.cibuildwheel.macos]
