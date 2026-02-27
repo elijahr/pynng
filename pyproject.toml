@@ -8,11 +8,11 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries",
     "Topic :: System :: Networking",
 ]
@@ -31,7 +31,7 @@ keywords = [
     "asyncio",
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-trio>=0.8.0", "trio>=0.22.0"]

@@ -11,7 +11,7 @@ Ergonomic bindings for [nanomsg next generation] \(nng), in Python.
 pynng provides a nice interface on top of the full power of nng.  nng, and
 therefore pynng, make it easy to communicate between processes on a single
 computer or computers across a network.  This library is compatible with Python
-≥ 3.9.  nng is the [rewriting](https://nanomsg.github.io/nng/RATIONALE.html) of
+≥ 3.10.  nng is the [rewriting](https://nanomsg.github.io/nng/RATIONALE.html) of
 [Nanomsg](https://nanomsg.org/), which is the spiritual successor to [ZeroMQ](http://zeromq.org/).
 
 Goals
