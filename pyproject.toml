@@ -73,7 +73,8 @@ test-command = "pytest {project}/test"
 # cp314t-win*: https://github.com/python/cpython/issues/127294
 # *-win32: 32-bit Python can't load 64-bit libclang during build
 # *i686: 32-bit manylinux containers lack package managers for libclang
-skip = "cp314t-win* *-win32 *i686"
+# pp*: clangir's vendored cindex uses c_char_p subclassing incompatible with PyPy's ctypes
+skip = "cp314t-win* *-win32 *i686 pp*"
 
 build-verbosity = 1
 
