@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.26)
 project(${SKBUILD_PROJECT_NAME} LANGUAGES C)
 
 # ============================================
@@ -174,7 +174,7 @@ add_custom_command(
 # Python Extension Module
 # ============================================
 
-Python_add_library(_nng MODULE ${CFFI_OUTPUT_FILE} WITH_SOABI USE_SABI)
+Python_add_library(_nng MODULE ${CFFI_OUTPUT_FILE} WITH_SOABI USE_SABI 3.10)
 
 # Suppress incompatible-pointer-types errors in CFFI-generated code.
 # The NNG API uses const-qualified pointer-to-pointer params (e.g. const nng_url **)

@@ -56,7 +56,7 @@ requires = [
 [tool.scikit-build]
 wheel.packages = ["pynng"]
 wheel.py-api = "cp310"
-cmake.version = ">=3.18"
+cmake.version = ">=3.26"
 cmake.verbose = true
 minimum-version = "0.8.0"
 build-dir = "./build/{cache_tag}"
@@ -83,7 +83,7 @@ before-build = "pip install 'clangir>=0.3.3' && python -m clangir.install_libcla
 [tool.cibuildwheel.windows]
 # Windows builds fail because they try to use the same directory for different
 # architectures, and that's no good.
-before-build = "pip install 'clangir>=0.3.3' && python -m clangir.install_libclang --skip-verify && bash .github/rmstuff.sh"
+before-build = "pip install \"clangir>=0.3.3\" && python -m clangir.install_libclang --skip-verify && bash .github/rmstuff.sh"
 environment = { PATH = "C:\\Program Files\\LLVM\\bin;$PATH" }
 
 [tool.cibuildwheel.macos]
