@@ -68,6 +68,7 @@ FetchContent_Declare(
   mbedtls
   GIT_REPOSITORY ${MBEDTLS_REPO}
   GIT_TAG ${MBEDTLS_REV}
+  GIT_SHALLOW TRUE
 )
 
 # Make mbedTLS available

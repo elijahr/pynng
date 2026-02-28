@@ -36,8 +36,13 @@ NNG_HEADERS = [
 EXCLUDE_PATTERNS = [r"nng_tls_config_(pass|key)"]
 
 
-def generate_cdef() -> str:
-    """Parse NNG headers and generate CFFI cdef declarations."""
+def generate_cdef() -> tuple[str, list[str]]:
+    """Parse NNG headers and generate CFFI cdef declarations.
+
+    Returns:
+        A tuple of (cdef_string, existing_headers) where existing_headers
+        is the filtered list of NNG_HEADERS that exist on disk.
+    """
     # Build umbrella header that includes all existing NNG headers
     existing = [
         h for h in NNG_HEADERS if os.path.exists(os.path.join(NNG_INCLUDE_DIR, h))
@@ -69,7 +74,7 @@ def generate_cdef() -> str:
     if extra_defines:
         cdef = cdef + "\n" + extra_defines
 
-    return cdef
+    return cdef, existing
 
 
 def _extract_defines(nng_h_path: str) -> str:
@@ -89,8 +94,8 @@ def _extract_defines(nng_h_path: str) -> str:
     return "\n".join(defines)
 
 
-# Generate cdef content
-cdef_content = generate_cdef()
+# Generate cdef content and get the list of existing headers
+cdef_content, _existing_headers = generate_cdef()
 
 callbacks = """
     extern "Python" void _async_complete(void *);
@@ -99,10 +104,7 @@ callbacks = """
 
 ffibuilder = FFI()
 
-# Build set_source includes from the same header list
-_existing_headers = [
-    h for h in NNG_HEADERS if os.path.exists(os.path.join(NNG_INCLUDE_DIR, h))
-]
+# Build set_source includes from the existing headers returned by generate_cdef()
 _source_includes = "\n".join(f"        #include <{h}>" for h in _existing_headers)
 
 ffibuilder.set_source(
