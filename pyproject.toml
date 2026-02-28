@@ -72,8 +72,8 @@ test-command = "pytest {project}/test"
 
 # cp314t-win*: https://github.com/python/cpython/issues/127294
 # *-win32: 32-bit Python can't load 64-bit libclang during build
-# pp*: PyPy doesn't support the stable ABI (abi3 wheels)
-skip = "cp314t-win* *-win32 pp*"
+# *i686: 32-bit manylinux containers lack package managers for libclang
+skip = "cp314t-win* *-win32 *i686"
 
 build-verbosity = 1
 
