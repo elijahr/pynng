@@ -17,13 +17,13 @@
 # -- Project information -----------------------------------------------------
 
 project = "pynng"
-copyright = "2018 - 2024 Cody Piersall"
+copyright = "2018 - 2026 Cody Piersall"
 author = "Cody Piersall"
 
 # The short X.Y version
 version = ""
 # The full version, including alpha/beta/rc tags
-release = "0.1.0"
+release = ""
 
 
 # -- General configuration ---------------------------------------------------
@@ -157,7 +157,7 @@ texinfo_documents = [
         "pynng Documentation",
         author,
         "pynng",
-        "One line description of project.",
+        "Ergonomic Python bindings for nanomsg next generation (nng).",
         "Miscellaneous",
     ),
 ]
