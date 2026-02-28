@@ -14,7 +14,12 @@ from cffi import FFI
 
 from headerkit.writers.cffi import header_to_cffi
 
-NNG_INCLUDE_DIR = os.environ["NNG_INCLUDE_DIR"]
+NNG_INCLUDE_DIR = os.environ.get("NNG_INCLUDE_DIR")
+if NNG_INCLUDE_DIR is None:
+    raise RuntimeError(
+        "NNG_INCLUDE_DIR environment variable must be set. "
+        "This is normally set by the CMake build system."
+    )
 
 NNG_HEADERS = [
     "nng/nng.h",

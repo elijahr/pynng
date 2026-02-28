@@ -49,6 +49,11 @@ jobs:
           current_rev="${{ steps.current.outputs.current_rev }}"
           echo "We are tracking: $current_rev"
 
+          # Known upstream tag we've last evaluated. Update this when
+          # bumping NNG to acknowledge the new release.
+          KNOWN_UPSTREAM_TAG="v1.9.0"
+          echo "known_upstream_tag=$KNOWN_UPSTREAM_TAG" >> $GITHUB_OUTPUT
+
       - name: Try building against latest upstream
         id: build
         continue-on-error: true
@@ -103,10 +108,10 @@ jobs:
             exit 0
           fi
 
-          # Only create issue if there's actually a newer version
-          # Simple check: if latest_tag != current_rev and build was attempted
-          if [ "$LATEST_TAG" = "$CURRENT_REV" ]; then
-            echo "Already tracking latest version, nothing to do"
+          # Only create issue if upstream has released a new version
+          KNOWN_UPSTREAM_TAG="${{ steps.check.outputs.known_upstream_tag }}"
+          if [ "$LATEST_TAG" = "$KNOWN_UPSTREAM_TAG" ]; then
+            echo "No new upstream release (latest: $LATEST_TAG, known: $KNOWN_UPSTREAM_TAG)"
             exit 0
           fi
 
