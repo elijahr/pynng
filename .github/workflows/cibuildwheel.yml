@@ -54,7 +54,6 @@ jobs:
         with:
           fetch-depth: 0 # Optional, use if you use setuptools_scm
           fetch-tags: true
-          submodules: true # Optional, use if you have submodules
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v4

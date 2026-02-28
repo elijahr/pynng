@@ -118,6 +118,8 @@ elseif(WIN32)
 endif()
 
 # Download NNG
+# NB: GIT_SHALLOW intentionally omitted -- NNG_REV may be a branch name,
+# which can cause shallow clone failures with some git/CMake versions.
 FetchContent_Declare(
   nng
   GIT_REPOSITORY ${NNG_REPO}
