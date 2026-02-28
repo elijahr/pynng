@@ -123,6 +123,13 @@ class TestFFIDefines:
         [
             "NNG_FLAG_ALLOC",
             "NNG_FLAG_NONBLOCK",
+            pytest.param(
+                "NNG_MAXADDRLEN",
+                marks=pytest.mark.skipif(
+                    not hasattr(lib, "NNG_MAXADDRLEN"),
+                    reason="NNG_MAXADDRLEN only available with headerkit build system",
+                ),
+            ),
         ],
     )
     def test_ffi_has_flag_defines(self, define_name):
@@ -162,28 +169,9 @@ if not _NNG_INCLUDE_DIR:
     if candidates:
         _NNG_INCLUDE_DIR = candidates[0]
 
-def _can_import_build_pynng():
-    """Check if build_pynng can be imported (requires headerkit and NNG headers)."""
-    if _NNG_INCLUDE_DIR is None:
-        return False
-    old = os.environ.get("NNG_INCLUDE_DIR")
-    os.environ["NNG_INCLUDE_DIR"] = _NNG_INCLUDE_DIR
-    try:
-        import build_pynng  # noqa: F401
-
-        return True
-    except (ImportError, RuntimeError):
-        return False
-    finally:
-        if old is None:
-            os.environ.pop("NNG_INCLUDE_DIR", None)
-        else:
-            os.environ["NNG_INCLUDE_DIR"] = old
-
-
 _skip_no_headers = pytest.mark.skipif(
-    not _can_import_build_pynng(),
-    reason="build_pynng not importable (requires headerkit and NNG headers)",
+    _NNG_INCLUDE_DIR is None,
+    reason="NNG headers not available (set NNG_INCLUDE_DIR or build first)",
 )
 
 
