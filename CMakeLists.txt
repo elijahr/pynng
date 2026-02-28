@@ -185,7 +185,7 @@ endif()
 # Suppress incompatible-pointer-types errors in CFFI-generated code.
 # The NNG API uses const-qualified pointer-to-pointer params (e.g. const nng_url **)
 # but the generated CFFI cdef doesn't carry the const qualifier yet.
-# TODO: Fix const handling in clangir cdef writer and remove this workaround.
+# TODO: Fix const handling in headerkit cdef writer and remove this workaround.
 if(NOT MSVC)
   target_compile_options(_nng PRIVATE -Wno-incompatible-pointer-types)
 endif()
