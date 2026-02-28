@@ -65,9 +65,9 @@ Using asyncio:
 
 .. note::
 
-   When the socket is closed (or the ``recv_timeout`` expires), the
-   ``async for`` loop exits cleanly instead of raising an exception. This makes
-   it safe to use in tasks that are cancelled externally.
+   When the socket is closed, the ``async for`` loop exits cleanly via
+   ``StopAsyncIteration``. Other exceptions such as ``Timeout`` propagate
+   normally.
 
 Async Close (``aclose()``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -207,6 +207,6 @@ The name assigned can be retrieved using the ``NNG_OPT_LOCADDR`` option.
         # The address can be used for dialing from another process
         # dialer = sock.dial("abstract://my_test_socket")
 
-For a complete example, see :doc:`../examples/abstract`.
+For a complete example, see `abstract.py <https://github.com/codypiersall/pynng/blob/master/examples/abstract.py>`_.
 
 .. _Trio: https://trio.readthedocs.io
