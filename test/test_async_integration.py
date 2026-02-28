@@ -7,7 +7,6 @@ through the CFFI wrapper layer.
 """
 
 import asyncio
-import time
 
 import pytest
 import trio
