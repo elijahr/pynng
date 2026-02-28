@@ -56,6 +56,8 @@ jobs:
           sudo apt-get update && sudo apt-get install -y ninja-build libclang-dev python3-dev
           pip install uv
 
+          set -o pipefail
+
           # Try build with latest upstream NNG
           latest_tag="${{ steps.check.outputs.latest_tag }}"
           echo "Testing build against upstream NNG $latest_tag..."
@@ -83,7 +85,7 @@ jobs:
           fi
 
       - name: Create or update issue
-        if: always()
+        if: steps.check.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_REV: ${{ steps.current.outputs.current_rev }}
