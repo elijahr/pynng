@@ -22,6 +22,10 @@ async def main():
         await send_task
         await asyncio.sleep(0.5)
         recv_task.cancel()
+        try:
+            await recv_task
+        except asyncio.CancelledError:
+            pass
 
 
 asyncio.run(main())
