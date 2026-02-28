@@ -7,13 +7,12 @@ import platform
 
 def test_abstract_addr_basic():
     """Test basic AbstractAddr functionality"""
-    # Create a mock nng_sockaddr_abstract structure
-    # We can't easily create a real one without the actual nng library,
-    # so we'll test the class methods indirectly
-
     # Test that NNG_AF_ABSTRACT is available
     assert hasattr(pynng.lib, "NNG_AF_ABSTRACT")
     assert pynng.lib.NNG_AF_ABSTRACT == 6
+    # Verify the Python AbstractAddr class exists and is a proper SockAddr subclass
+    assert hasattr(pynng.sockaddr, "AbstractAddr")
+    assert issubclass(pynng.sockaddr.AbstractAddr, pynng.sockaddr.SockAddr)
 
 
 def test_abstract_addr_in_type_to_str():
@@ -22,19 +21,26 @@ def test_abstract_addr_in_type_to_str():
     assert pynng.sockaddr.SockAddr.type_to_str[pynng.lib.NNG_AF_ABSTRACT] == "abstract"
 
 
-def test_nng_sockaddr_includes_abstract():
-    """Test that _nng_sockaddr function includes AbstractAddr in lookup"""
-    # Test that the lookup dictionary in the source code includes AbstractAddr
-    # We'll check this by examining the source code directly
-    import inspect
+def test_nng_sockaddr_dispatch_includes_abstract():
+    """Test that _nng_sockaddr correctly dispatches NNG_AF_ABSTRACT to AbstractAddr"""
     from pynng.sockaddr import _nng_sockaddr
 
-    # Get the source code of the function
-    source = inspect.getsource(_nng_sockaddr)
+    # Create a mock sockaddr with abstract family to verify dispatch
+    class MockAbstractSockAddr:
+        def __init__(self):
+            self.s_family = pynng.lib.NNG_AF_ABSTRACT
+            self.s_abstract = MockAbstract()
 
-    # Check that NNG_AF_ABSTRACT and AbstractAddr are in the source
-    assert "NNG_AF_ABSTRACT" in source
-    assert "AbstractAddr" in source
+    class MockAbstract:
+        def __init__(self):
+            self.sa_len = 4
+            self.sa_name = bytearray(107)
+            self.sa_name[0:4] = b"test"
+
+    mock_addr = [MockAbstractSockAddr()]
+    result = _nng_sockaddr(mock_addr)
+    assert isinstance(result, pynng.sockaddr.AbstractAddr)
+    assert result.family == pynng.lib.NNG_AF_ABSTRACT
 
 
 @pytest.mark.skipif(
@@ -97,28 +103,28 @@ def test_abstract_socket_with_special_chars():
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Abstract sockets are Linux-specific"
 )
+@pytest.mark.xfail(
+    raises=pynng.exceptions.InvalidOperation,
+    reason="Auto-bind with empty abstract name not supported in all NNG versions",
+    strict=False,
+)
 def test_abstract_socket_auto_bind():
     """Test abstract socket auto-bind functionality with empty name"""
     # Test with empty abstract socket name for auto-bind
     abstract_addr = "abstract://"
 
     with pynng.Pair0(recv_timeout=100) as sock1, pynng.Pair0(recv_timeout=100) as sock2:
-        try:
-            listener = sock1.listen(abstract_addr)
-            sock2.dial(abstract_addr)
+        listener = sock1.listen(abstract_addr)
+        sock2.dial(abstract_addr)
 
-            # Test communication
-            sock1.send(b"auto-bind test")
-            received = sock2.recv()
-            assert received == b"auto-bind test"
+        # Test communication
+        sock1.send(b"auto-bind test")
+        received = sock2.recv()
+        assert received == b"auto-bind test"
 
-            # Test that the address is properly handled
-            local_addr = listener.local_address
-            assert isinstance(local_addr, pynng.sockaddr.AbstractAddr)
-        except pynng.exceptions.InvalidOperation:
-            # Auto-bind with empty name might not be supported
-            # This is acceptable behavior for some implementations
-            pytest.skip("Auto-bind with empty name not supported")
+        # Test that the address is properly handled
+        local_addr = listener.local_address
+        assert isinstance(local_addr, pynng.sockaddr.AbstractAddr)
 
 
 @pytest.mark.skipif(
@@ -241,9 +247,8 @@ def test_abstract_addr_name_bytes():
 
 
 def test_abstract_addr_name_with_uri_encoding():
-    """Test AbstractAddr name property with URI encoding/decoding"""
+    """Test AbstractAddr name property with NUL bytes and URI decoding"""
 
-    # Create a mock abstract sockaddr with URI-encoded characters
     class MockAbstractSockAddr:
         def __init__(self):
             self.s_family = pynng.lib.NNG_AF_ABSTRACT
@@ -253,26 +258,20 @@ def test_abstract_addr_name_with_uri_encoding():
         def __init__(self):
             self.sa_len = 11
             self.sa_name = bytearray(107)
-            # Set bytes that represent "test%00socket" when URI-decoded
             test_bytes = b"test\x00socket"
             self.sa_name[0:11] = test_bytes
 
-    # Create a mock ffi_sock_addr
     mock_sock_addr = [MockAbstractSockAddr()]
-
-    # Create AbstractAddr instance
     abstract_addr = pynng.sockaddr.AbstractAddr(mock_sock_addr)
 
-    # Test name property with URI decoding
+    # Verify the exact decoded name, including the NUL byte
     name = abstract_addr.name
-    # The name should handle the NUL byte appropriately
-    assert "test" in name and "socket" in name
+    assert name == "test\x00socket"
 
 
 def test_abstract_addr_str_representation():
     """Test AbstractAddr string representation"""
 
-    # Create a mock abstract sockaddr
     class MockAbstractSockAddr:
         def __init__(self):
             self.s_family = pynng.lib.NNG_AF_ABSTRACT
@@ -282,17 +281,12 @@ def test_abstract_addr_str_representation():
         def __init__(self):
             self.sa_len = 9
             self.sa_name = bytearray(107)
-            # Set bytes for "test_name"
             test_bytes = b"test_name"
             self.sa_name[0:9] = test_bytes
 
-    # Create a mock ffi_sock_addr
     mock_sock_addr = [MockAbstractSockAddr()]
-
-    # Create AbstractAddr instance
     abstract_addr = pynng.sockaddr.AbstractAddr(mock_sock_addr)
 
-    # Test string representation
+    # Verify exact string representation
     addr_str = str(abstract_addr)
-    assert addr_str.startswith("abstract://")
-    assert "test_name" in addr_str
+    assert addr_str == "abstract://test_name"
