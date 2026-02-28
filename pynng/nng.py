@@ -439,7 +439,10 @@ class Socket:
             self._dialers = {}
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @property
     def socket(self):
