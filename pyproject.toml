@@ -10,11 +10,11 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries",
     "Topic :: System :: Networking",
 ]
@@ -23,10 +23,8 @@ dependencies = [
     "sniffio",
 ]
 description = "Networking made simply using nng"
-# Note: when we drop Python 3.8 we can use the new license version and CI won't yell at
-# setuptools 3.8 requires this version.
-# uncomment when dropping python3.8
-# license = "MIT"
+# Note: license = "MIT" (PEP 639) requires setuptools >= 77 or scikit-build-core.
+# Keep the old format until the build system migration lands.
 license = {file = "LICENSE.txt"}
 dynamic = ["version"]
 keywords = [
@@ -40,6 +38,7 @@ keywords = [
     "asyncio",
 ]
 readme = "README.md"
+requires-python = ">=3.10"
 
 [project.optional-dependencies]
 dev = [
@@ -104,7 +103,7 @@ environment = { CMAKE_OSX_ARCHITECTURES="x86_64;arm64" }
 [tool.black]
 # Just a placeholder because I have a plugin that won't run without a section in
 # pyproject.toml
-target-version = ["py38"]
+target-version = ["py310"]
 
 # pytest configuration
 [tool.pytest.ini_options]
