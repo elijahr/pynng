@@ -123,7 +123,6 @@ class TestFFIDefines:
         [
             "NNG_FLAG_ALLOC",
             "NNG_FLAG_NONBLOCK",
-            "NNG_MAXADDRLEN",
         ],
     )
     def test_ffi_has_flag_defines(self, define_name):
@@ -135,6 +134,10 @@ class TestFFIDefines:
     def test_flag_nonblock_is_integer(self):
         assert isinstance(lib.NNG_FLAG_NONBLOCK, int)
 
+    @pytest.mark.skipif(
+        not hasattr(lib, "NNG_MAXADDRLEN"),
+        reason="NNG_MAXADDRLEN only available with headerkit build system",
+    )
     def test_maxaddrlen_is_positive(self):
         assert lib.NNG_MAXADDRLEN > 0
 
