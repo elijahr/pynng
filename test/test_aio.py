@@ -9,7 +9,7 @@ import pynng
 addr = "inproc://test-addr"
 
 
-@pytest.mark.trio
+@pytest.mark.asyncio
 async def test_arecv_asend_asyncio():
     with pynng.Pair0(listen=addr, recv_timeout=1000) as listener, pynng.Pair0(
         dial=addr
@@ -120,3 +120,11 @@ async def test_pub_sub_trio():
 
         # head over to the pub
         await pub()
+
+
+@pytest.mark.trio
+async def test_aio_invalid_backend():
+    from pynng import _aio
+    with pynng.Pair0() as s:
+        with pytest.raises(ValueError, match="not currently supported"):
+            _aio.AIOHelper(s, "nonexistent_backend")

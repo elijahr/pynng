@@ -34,6 +34,9 @@ def test_socket_send_recv_msg():
         s1.send_msg(msg)
         msg2 = s2.recv_msg()
         assert msg2.bytes == b"we are friends, old buddy"
+        # Verify pipe was associated on receive
+        assert msg2.pipe is not None
+        assert msg2.pipe is s2.pipes[0]
 
 
 @pytest.mark.trio
@@ -125,3 +128,45 @@ async def test_cannot_double_asend():
 
         # don't really need to receive, but linters hate not using s2
         await s2.arecv_msg()
+
+
+def test_message_del_without_send():
+    import gc
+    msg = pynng.Message(b"never sent")
+    del msg
+    gc.collect()  # should free once without error
+
+
+def test_message_del_after_send():
+    import gc
+    with pynng.Pair0(listen="inproc://test-msg-del", recv_timeout=1000) as s1, \
+         pynng.Pair0(dial="inproc://test-msg-del", recv_timeout=1000) as s2:
+        wait_pipe_len(s1, 1)
+        msg = pynng.Message(b"test data")
+        s1.send_msg(msg)
+        assert s2.recv() == b"test data"
+        del msg
+        gc.collect()  # should not double-free
+
+
+def test_message_pipe_setter_rejects_non_pipe():
+    msg = pynng.Message(b"test")
+    with pytest.raises(ValueError):
+        msg.pipe = "not a pipe"
+    with pytest.raises(ValueError):
+        msg.pipe = 42
+
+
+def test_message_mem_freed_after_send():
+    """Verify that sending a message marks it as freed so __del__ doesn't double-free"""
+    with pynng.Req0(listen=addr, recv_timeout=to) as s1, pynng.Rep0(
+        dial=addr, recv_timeout=to
+    ) as s2:
+        wait_pipe_len(s1, 1)
+        msg = pynng.Message(b"test data")
+        assert not msg._mem_freed
+        s1.send_msg(msg)
+        assert msg._mem_freed
+        # __del__ should not crash since _mem_freed is True
+        msg.__del__()
+        s2.recv_msg()
