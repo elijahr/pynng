@@ -174,7 +174,13 @@ add_custom_command(
 # Python Extension Module
 # ============================================
 
-Python_add_library(_nng MODULE ${CFFI_OUTPUT_FILE} WITH_SOABI USE_SABI 3.10)
+# USE_SABI produces abi3-tagged wheels importable by Python 3.10+.
+# PyPy doesn't support the stable ABI, so fall back to normal builds.
+if(SKBUILD_SABI_COMPONENT)
+  Python_add_library(_nng MODULE ${CFFI_OUTPUT_FILE} WITH_SOABI USE_SABI 3.10)
+else()
+  Python_add_library(_nng MODULE ${CFFI_OUTPUT_FILE} WITH_SOABI)
+endif()
 
 # Suppress incompatible-pointer-types errors in CFFI-generated code.
 # The NNG API uses const-qualified pointer-to-pointer params (e.g. const nng_url **)
@@ -203,21 +209,23 @@ else()
     ${Python_LIBRARIES}
     pthread)
 
-  # Only link -latomic if the compiler actually needs it. Some platforms
-  # (e.g. aarch64) have native atomic instructions and don't ship libatomic,
-  # while others (e.g. 32-bit ARM, RISC-V) need it for 64-bit atomics.
+  # Only link -latomic on Linux/non-Apple platforms. macOS provides atomic
+  # intrinsics in the compiler runtime and has no libatomic. The universal2
+  # cross-compilation also breaks CheckCSourceCompiles for this test.
   # See: https://github.com/codypiersall/pynng/issues/133
-  include(CheckCSourceCompiles)
-  check_c_source_compiles("
-    #include <stdatomic.h>
-    int main(void) {
-      _Atomic long long x = 0;
-      __atomic_fetch_add(&x, 1, __ATOMIC_SEQ_CST);
-      return 0;
-    }
-  " HAVE_ATOMICS_WITHOUT_LIB)
-  if(NOT HAVE_ATOMICS_WITHOUT_LIB)
-    target_link_libraries(_nng PRIVATE atomic)
+  if(NOT APPLE)
+    include(CheckCSourceCompiles)
+    check_c_source_compiles("
+      #include <stdatomic.h>
+      int main(void) {
+        _Atomic long long x = 0;
+        __atomic_fetch_add(&x, 1, __ATOMIC_SEQ_CST);
+        return 0;
+      }
+    " HAVE_ATOMICS_WITHOUT_LIB)
+    if(NOT HAVE_ATOMICS_WITHOUT_LIB)
+      target_link_libraries(_nng PRIVATE atomic)
+    endif()
   endif()
 endif()
 
