@@ -35,7 +35,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-trio>=0.8.0", "trio>=0.22.0"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-trio>=0.8.0", "trio>=0.22.0", "headerkit>=0.6.0"]
 docs = ["sphinx", "sphinx-rtd-theme", "sphinxcontrib-trio"]
 
 [project.urls]
@@ -67,7 +67,7 @@ cmake.build-type = "Release"
 version_file = "pynng/_version.py"
 
 [tool.cibuildwheel]
-test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio"]
+test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio", "headerkit>=0.6.0"]
 test-command = "pytest {project}/test"
 
 # cp314t-win*: https://github.com/python/cpython/issues/127294
