@@ -2,17 +2,17 @@
 
 """Build the pynng CFFI interface.
 
-Uses clangir's libclang backend to parse NNG C headers into an IR,
+Uses headerkit's libclang backend to parse NNG C headers into an IR,
 then converts the IR to CFFI cdef strings.
 """
 
 import os
 import re
 
-from clangir.backends import get_backend
+from headerkit.backends import get_backend
 from cffi import FFI
 
-from clangir.writers.cffi import header_to_cffi
+from headerkit.writers.cffi import header_to_cffi
 
 NNG_INCLUDE_DIR = os.environ["NNG_INCLUDE_DIR"]
 
@@ -50,7 +50,7 @@ def generate_cdef() -> str:
 {includes}
 """
 
-    # Parse with clangir libclang backend
+    # Parse with headerkit libclang backend
     backend = get_backend("libclang")
     header = backend.parse(
         umbrella,
