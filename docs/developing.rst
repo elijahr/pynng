@@ -121,7 +121,7 @@ VS Code and lldb:
    breakpoint.
 
 .. _cibuildwheel options: https://cibuildwheel.readthedocs.io/en/stable/options/
-.. _headerkit: https://github.com/codypiersall/headerkit
+.. _headerkit: https://github.com/axiomantic/headerkit
 .. _mbedtls: https://github.com/Mbed-TLS/mbedtls
 .. _nektos/act: https://github.com/nektos/act
 .. _nng: https://github.com/nanomsg/nng

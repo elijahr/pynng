@@ -15,7 +15,7 @@ build backend, configured in ``pyproject.toml``. The build process:
    NNG is built as a static library with TLS support via mbedTLS.
 
 2. **headerkit generates CFFI declarations**: At build time,
-   `headerkit <https://github.com/codypiersall/headerkit>`_ parses NNG's C
+   `headerkit <https://github.com/axiomantic/headerkit>`_ parses NNG's C
    headers using libclang and auto-generates the CFFI module definition file
    ``pynng/_nng.py``. This replaces the previously hand-maintained CFFI
    declarations.
