@@ -1,5 +1,6 @@
 import pytest
 
+import pynng
 from pynng import Pair0, TLSConfig
 
 SERVER_CERT = """
@@ -142,22 +143,21 @@ def test_tls_config_own_cert_both_required():
 
 def test_tls_auth_mode():
     config = TLSConfig(TLSConfig.MODE_CLIENT)
-    assert isinstance(config, TLSConfig)
-    assert config._tls_config is not None
-    # Each set_auth_mode call should succeed without error on a valid config
     config.set_auth_mode(TLSConfig.AUTH_MODE_NONE)
-    assert config._tls_config is not None, "Config became invalid after AUTH_MODE_NONE"
     config.set_auth_mode(TLSConfig.AUTH_MODE_OPTIONAL)
-    assert config._tls_config is not None, "Config became invalid after AUTH_MODE_OPTIONAL"
     config.set_auth_mode(TLSConfig.AUTH_MODE_REQUIRED)
-    assert config._tls_config is not None, "Config became invalid after AUTH_MODE_REQUIRED"
-    # Verify invalid auth mode raises an exception
-    with pytest.raises(Exception):
+    # NNG has no getter for auth_mode, so we verify set_auth_mode
+    # does not raise for valid modes (it calls check_err internally).
+    # Invalid auth mode: negative values cause OverflowError at CFFI level
+    # (unsigned int), large positive values cause NNGException from NNG
+    with pytest.raises(OverflowError):
         config.set_auth_mode(-999)
+    with pytest.raises(pynng.NNGException):
+        config.set_auth_mode(9999)
 
 
 def test_tls_auth_mode_in_constructor():
-    config = TLSConfig(TLSConfig.MODE_CLIENT,
-                       auth_mode=TLSConfig.AUTH_MODE_NONE)
-    assert isinstance(config, TLSConfig)
-    assert config._tls_config is not None, "TLS config pointer not allocated"
+    # AUTH_MODE_NONE has value 0; tests the "if auth_mode is not None:" fix
+    for mode in (TLSConfig.AUTH_MODE_NONE, TLSConfig.AUTH_MODE_OPTIONAL, TLSConfig.AUTH_MODE_REQUIRED):
+        config = TLSConfig(TLSConfig.MODE_CLIENT, auth_mode=mode)
+        assert isinstance(config, TLSConfig)

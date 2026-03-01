@@ -1,5 +1,3 @@
-import time
-
 import pytest
 import pynng
 import pynng.sockaddr
@@ -108,7 +106,7 @@ def test_abstract_socket_with_special_chars():
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Abstract sockets are Linux-specific"
 )
-@pytest.mark.xfail(strict=False, reason="NNG abstract socket auto-bind may not be supported")
+@pytest.mark.xfail(strict=True, reason="NNG abstract socket auto-bind may not be supported")
 def test_abstract_socket_auto_bind():
     """Test that abstract sockets can auto-bind (assign a random name).
 
@@ -137,66 +135,47 @@ def test_abstract_socket_with_different_protocols():
     ]
 
     for server_proto, client_proto, proto_name in protocols:
-        # Use a unique address for each protocol to avoid "Address in use" errors
         abstract_addr = f"abstract://test_{proto_name}_protocol"
 
-        # Retry logic to handle race conditions
-        max_retries = 5
-        for retry in range(max_retries):
-            try:
-                with server_proto(recv_timeout=1000) as server, client_proto(
-                    recv_timeout=1000
-                ) as client:
-                    if server_proto == pynng.Pub0 and client_proto == pynng.Sub0:
-                        # Special handling for pub/sub
-                        server.listen(abstract_addr)
-                        client.dial(abstract_addr)
-                        client.subscribe("")  # Subscribe to all messages
-                        wait_pipe_len(server, 1)
-                        server.send(b"pubsub test")
-                        received = client.recv()
-                        assert received == b"pubsub test"
-                    elif server_proto == pynng.Push0 and client_proto == pynng.Pull0:
-                        # Special handling for push/pull
-                        server.listen(abstract_addr)
-                        client.dial(abstract_addr)
-                        wait_pipe_len(server, 1)
-                        server.send(b"pushpull test")
-                        received = client.recv()
-                        assert received == b"pushpull test"
-                    elif server_proto == pynng.Req0 and client_proto == pynng.Rep0:
-                        # Special handling for req/rep
-                        client.listen(abstract_addr)
-                        server.dial(abstract_addr)
-                        wait_pipe_len(client, 1)
-                        server.send(b"reqrep test")
-                        received = client.recv()
-                        assert received == b"reqrep test"
-                        client.send(b"reply")
-                        reply = server.recv()
-                        assert reply == b"reply"
-                    else:
-                        # Default handling for pair protocols
-                        server.listen(abstract_addr)
-                        client.dial(abstract_addr)
-                        wait_pipe_len(server, 1)
-                        server.send(b"pair test")
-                        received = client.recv()
-                        assert received == b"pair test"
-
-                # If we get here, the test passed for this protocol
-                break
-
-            except pynng.exceptions.Timeout:
-                if retry == max_retries - 1:
-                    # This was the last retry, re-raise the exception
-                    raise
-                # Log the retry attempt
-                print(
-                    f"Retry {retry + 1}/{max_retries} for {proto_name} protocol due to timeout"
-                )
-                # Add a small delay before retrying
-                time.sleep(0.1)
+        with server_proto(recv_timeout=1000) as server, client_proto(
+            recv_timeout=1000
+        ) as client:
+            if server_proto == pynng.Pub0 and client_proto == pynng.Sub0:
+                # Special handling for pub/sub
+                server.listen(abstract_addr)
+                client.dial(abstract_addr)
+                client.subscribe("")  # Subscribe to all messages
+                wait_pipe_len(server, 1)
+                server.send(b"pubsub test")
+                received = client.recv()
+                assert received == b"pubsub test"
+            elif server_proto == pynng.Push0 and client_proto == pynng.Pull0:
+                # Special handling for push/pull
+                server.listen(abstract_addr)
+                client.dial(abstract_addr)
+                wait_pipe_len(server, 1)
+                server.send(b"pushpull test")
+                received = client.recv()
+                assert received == b"pushpull test"
+            elif server_proto == pynng.Req0 and client_proto == pynng.Rep0:
+                # Special handling for req/rep
+                client.listen(abstract_addr)
+                server.dial(abstract_addr)
+                wait_pipe_len(client, 1)
+                server.send(b"reqrep test")
+                received = client.recv()
+                assert received == b"reqrep test"
+                client.send(b"reply")
+                reply = server.recv()
+                assert reply == b"reply"
+            else:
+                # Default handling for pair protocols
+                server.listen(abstract_addr)
+                client.dial(abstract_addr)
+                wait_pipe_len(server, 1)
+                server.send(b"pair test")
+                received = client.recv()
+                assert received == b"pair test"
 
 
 @pytest.mark.skipif(
@@ -206,8 +185,8 @@ def test_abstract_socket_error_on_non_linux():
     """Test that abstract sockets raise appropriate errors on non-Linux systems"""
     abstract_addr = "abstract://test_socket"
 
-    with pytest.raises(pynng.exceptions.NNGException):
-        with pynng.Pair0() as sock:
+    with pynng.Pair0() as sock:
+        with pytest.raises(pynng.exceptions.NNGException):
             sock.listen(abstract_addr)
 
 

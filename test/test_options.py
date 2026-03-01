@@ -1,4 +1,5 @@
 import socket
+import sys
 
 import pynng
 import pynng.options
@@ -149,3 +150,26 @@ def test_pointer_option_is_writeonly():
     with pynng.Pair0() as s:
         with pytest.raises(TypeError):
             _ = s.tls_config
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="select.select() may not work with NNG fds on Windows")
+def test_recv_send_fd():
+    """Test recv_fd and send_fd return valid file descriptors for polling."""
+    import select
+    from _test_util import wait_pipe_len
+    addr = "inproc://test-recv-send-fd"
+    with pynng.Pair0(listen=addr, recv_timeout=5000) as s0, \
+         pynng.Pair0(dial=addr) as s1:
+        wait_pipe_len(s0, 1)
+        fd = s0.recv_fd
+        assert isinstance(fd, int)
+        assert fd >= 0
+        sfd = s0.send_fd
+        assert isinstance(sfd, int)
+        assert sfd >= 0
+        # Functional: send data, then poll recv_fd for readability
+        s1.send(b"hello")
+        readable, _, _ = select.select([s0.recv_fd], [], [], 5.0)
+        assert readable, "recv_fd was not readable after peer sent data"
+        data = s0.recv()
+        assert data == b"hello"
