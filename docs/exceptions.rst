@@ -64,7 +64,7 @@ description of the exception.
 | ``PermissionDenied``       | ``NNG_EPERM``        | You did not have permission to do the requested  |
 |                            |                      | operation.                                       |
 +----------------------------+----------------------+--------------------------------------------------+
-| ``MessageTooLarge``        | ``NNG_EMSGSiZE``     |                                                  |
+| ``MessageTooLarge``        | ``NNG_EMSGSIZE``     |                                                  |
 +----------------------------+----------------------+--------------------------------------------------+
 | ``ConnectionReset``        | ``NNG_ECONNRESET``   |                                                  |
 +----------------------------+----------------------+--------------------------------------------------+
