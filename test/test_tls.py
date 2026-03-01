@@ -61,8 +61,16 @@ nFcJUXxIIJLAKbqnMRIp46OP
 # we use a self-signed certificate
 CA_CERT = SERVER_CERT
 
-URL = "tls+tcp://localhost:5556"
+LISTEN_URL = "tls+tcp://localhost:0"
 BYTES = b"1234567890"
+
+
+def _tls_dial_url(server):
+    """Extract the actual assigned port from a TLS listener and build a dial URL."""
+    sa = server.listeners[0].local_address
+    import socket
+    port = socket.ntohs(sa.port)
+    return "tls+tcp://localhost:{}".format(port)
 
 
 def test_config_string():
@@ -79,8 +87,8 @@ def test_config_string():
         c_client = TLSConfig(TLSConfig.MODE_CLIENT, ca_string=CA_CERT, server_name="localhost")
         client.tls_config = c_client
 
-        server.listen(URL)
-        client.dial(URL)
+        server.listen(LISTEN_URL)
+        client.dial(_tls_dial_url(server))
         client.send(BYTES)
         assert server.recv() == BYTES
         server.send(BYTES)
@@ -102,8 +110,8 @@ def test_config_file(tmp_path):
         c_client = TLSConfig(TLSConfig.MODE_CLIENT, ca_files=[str(ca_crt_file)], server_name="localhost")
         client.tls_config = c_client
 
-        server.listen(URL)
-        client.dial(URL)
+        server.listen(LISTEN_URL)
+        client.dial(_tls_dial_url(server))
         client.send(BYTES)
         assert server.recv() == BYTES
         server.send(BYTES)
