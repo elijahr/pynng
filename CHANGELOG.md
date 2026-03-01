@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `async with` context manager support for sockets (`async with pynng.Pair0() as sock:`)
+- `async for` iteration over received messages (`async for msg in sock:`)
+- `aclose()` method for explicit async socket cleanup
+
 ### Changed
 - Switch cibuildwheel to uv build frontend, eliminating virtualenv.pyz downloads
 - Migrate build system from setuptools/CMake to scikit-build-core with headerkit for C header generation
