@@ -31,7 +31,7 @@ as before), but it matters if you build from source.
   llvm`` on macOS).
 
 .. _scikit-build-core: https://scikit-build-core.readthedocs.io
-.. _headerkit: https://github.com/codypiersall/headerkit
+.. _headerkit: https://github.com/axiomantic/headerkit
 
 Async Ergonomics (New)
 ----------------------
