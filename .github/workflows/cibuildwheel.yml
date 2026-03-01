@@ -1,6 +1,10 @@
 name: Build
 
-on: [push, pull_request, workflow_call]
+on:
+  push:
+  pull_request:
+  release:
+    types: [published]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -65,3 +69,39 @@ jobs:
         with:
           name: cibw-sdist
           path: dist/*.tar.gz
+
+  # To enable PyPI publishing:
+  # 1. On pypi.org: Add a "Trusted Publisher" for this repo
+  #    - Owner: codypiersall
+  #    - Repository: pynng
+  #    - Workflow: cibuildwheel.yml
+  #    - Environment: pypi
+  # 2. On GitHub: Create an environment called "pypi" in repo Settings > Environments
+  publish:
+    name: Publish to PyPI
+    needs: [build_wheels, make_sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pynng
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: cibw-*
+          merge-multiple: true
+
+      - name: Generate attestations
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
