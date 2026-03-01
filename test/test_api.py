@@ -142,10 +142,6 @@ def test_pair1_polyamorousness():
             assert s2.recv() == b"hello there s2"
 
 
-@pytest.mark.skipif(
-    platform.python_implementation() == "PyPy",
-    reason="Sub0 topic filtering has issues on PyPy wheels"
-)
 def test_sub_sock_options():
     with pynng.Pub0(listen=addr) as pub:
         # test single option topic
@@ -251,10 +247,6 @@ def test_nonblocking_send_msg():
             s.send_msg(msg, block=False)
 
 
-@pytest.mark.skipif(
-    platform.python_implementation() == "PyPy",
-    reason="PyPy GC does not guarantee __del__ timing"
-)
 def test_sockets_get_garbage_collected():
     # from issue90
     with pynng.Pub0() as _:
