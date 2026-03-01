@@ -12,8 +12,16 @@ directly.
 import glob
 import os
 import re
+import sys
 
 import pytest
+
+# Ensure the project root is on sys.path so that build_pynng.py is importable.
+# This is necessary in cibuildwheel and other environments where pytest runs
+# from a directory that doesn't include the project root.
+_PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from pynng._nng import ffi, lib
 
@@ -242,7 +250,7 @@ class TestGenerateCdef:
         """The generated cdef can be parsed by a fresh FFI without error."""
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _ = generate_cdef()
         test_ffi = __import__("cffi").FFI()
         # This will raise cffi.CDefError or cffi.FFIError if the cdef is bad
         test_ffi.cdef(cdef)
@@ -250,7 +258,7 @@ class TestGenerateCdef:
     def test_cdef_contains_core_types(self):
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _ = generate_cdef()
         for type_name in [
             "nng_socket",
             "nng_pipe",
@@ -265,7 +273,7 @@ class TestGenerateCdef:
     def test_cdef_contains_protocol_openers(self):
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _ = generate_cdef()
         for func in [
             "nng_pair0_open",
             "nng_req0_open",
@@ -283,7 +291,7 @@ class TestGenerateCdef:
     def test_cdef_excludes_filtered_patterns(self):
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _ = generate_cdef()
         assert "nng_tls_config_pass" not in cdef
         assert "nng_tls_config_key" not in cdef
         # But other TLS functions should be present
@@ -292,7 +300,7 @@ class TestGenerateCdef:
     def test_cdef_contains_core_functions(self):
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _ = generate_cdef()
         for func in ["nng_send", "nng_recv", "nng_close", "nng_aio_alloc", "nng_ctx_open"]:
             assert func in cdef, f"Missing function {func} in cdef"
 
@@ -324,7 +332,7 @@ class TestUmbrellaHeader:
 
         # The actual test: verify that generate_cdef() produces output that
         # includes declarations from across the header set, not just nng.h.
-        cdef = generate_cdef()
+        cdef, _ = generate_cdef()
 
         # Core nng.h types
         assert "nng_socket" in cdef, "Missing nng_socket from nng/nng.h"
