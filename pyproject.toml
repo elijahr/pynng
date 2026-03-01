@@ -34,7 +34,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-trio>=0.8.0", "trio>=0.22.0", "headerkit>=0.7.0"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-trio>=0.8.0", "trio>=0.22.0", "headerkit>=0.7.1"]
 docs = ["sphinx", "sphinx-rtd-theme", "sphinxcontrib-trio"]
 
 [project.urls]
@@ -48,7 +48,7 @@ requires = [
     "scikit-build-core>=0.8.0",
     "cffi",
     "cffi_buildtool",
-    "headerkit>=0.7.0",
+    "headerkit>=0.7.1",
     "setuptools-scm",
 ]
 
@@ -66,7 +66,7 @@ cmake.build-type = "Release"
 version_file = "pynng/_version.py"
 
 [tool.cibuildwheel]
-test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio", "headerkit>=0.7.0"]
+test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio", "headerkit>=0.7.1"]
 test-command = "pytest {project}/test"
 
 # cp314t-win*: https://github.com/python/cpython/issues/127294
@@ -80,18 +80,18 @@ build-verbosity = 1
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-before-build = "pip install 'headerkit>=0.7.0' && python -m headerkit.install_libclang --skip-verify"
+before-build = "pip install 'headerkit>=0.7.1' && python -m headerkit.install_libclang --skip-verify"
 
 [tool.cibuildwheel.windows]
 # Windows builds fail because they try to use the same directory for different
 # architectures, and that's no good.
-before-build = "pip install \"headerkit>=0.7.0\" && python -m headerkit.install_libclang --skip-verify && bash .github/rmstuff.sh"
+before-build = "pip install \"headerkit>=0.7.1\" && python -m headerkit.install_libclang --skip-verify && bash .github/rmstuff.sh"
 environment = { PATH = "C:\\Program Files\\LLVM\\bin;$PATH" }
 
 [tool.cibuildwheel.macos]
 # Specify universal2 building for macOS
 archs = ["universal2"]
-before-build = "pip install 'headerkit>=0.7.0' && python -m headerkit.install_libclang --skip-verify"
+before-build = "pip install 'headerkit>=0.7.1' && python -m headerkit.install_libclang --skip-verify"
 before-test = "python -m headerkit.install_libclang --skip-verify"
 environment = { CMAKE_OSX_ARCHITECTURES = "x86_64;arm64" }
 
