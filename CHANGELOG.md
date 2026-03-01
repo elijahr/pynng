@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `async for` iteration over received messages (`async for msg in sock:`)
 - `aclose()` method for explicit async socket cleanup
 
+### Added
+- `async with` context manager support for sockets (`async with pynng.Pair0() as sock:`)
+- `async for` iteration over received messages (`async for msg in sock:`)
+- `aclose()` method for explicit async socket cleanup
+
 ### Changed
 - Migrate build system from setuptools/CMake to scikit-build-core with headerkit for C header generation
 - Replace handwritten CFFI bindings with auto-generated bindings from NNG headers via headerkit
