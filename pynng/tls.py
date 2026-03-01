@@ -79,7 +79,7 @@ class TLSConfig:
         if own_key_string and own_cert_string:
             self.set_own_cert(own_cert_string, own_key_string, passwd)
 
-        if auth_mode:
+        if auth_mode is not None:
             self.set_auth_mode(auth_mode)
 
         if ca_files:
