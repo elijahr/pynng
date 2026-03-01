@@ -1,0 +1,34 @@
+name: Publish to PyPI
+
+# NOTE: This workflow requires a PyPI trusted publisher configured for
+# the GitHub repository. Set up an OIDC publisher on PyPI with:
+#   - Publisher: GitHub Actions
+#   - Repository: <owner>/<repo>
+#   - Workflow: publish.yml
+#   - Environment: pypi
+# See: https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write  # Required for OIDC trusted publishing
+
+jobs:
+  build:
+    uses: ./.github/workflows/cibuildwheel.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
