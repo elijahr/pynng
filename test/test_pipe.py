@@ -270,5 +270,4 @@ def test_pipe_properties():
          pynng.Pair0(dial="inproc://test-pipe-props") as s1:
         wait_pipe_len(s0, 1)
         pipe = s0.pipes[0]
-        assert isinstance(pipe.protocol_name, str)
-        assert len(pipe.protocol_name) > 0
+        assert pipe.protocol_name == "pair"

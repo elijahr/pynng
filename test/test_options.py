@@ -1,11 +1,12 @@
+import socket
+import sys
+
 import pynng
 import pynng.options
 import pytest
 from pathlib import Path
 
-PORT = 13131
-IP = "127.0.0.1"
-tcp_addr = "tcp://{}:{}".format(IP, PORT)
+tcp_addr = "tcp://127.0.0.1:0"
 addr = "inproc://test-addr"
 
 
@@ -51,39 +52,38 @@ def test_dial_blocking_behavior():
 
 
 def test_can_set_recvmaxsize():
+    from _test_util import wait_pipe_len
+
     with pynng.Pair1(
         recv_timeout=500, recv_max_size=100, listen=tcp_addr
-    ) as s0, pynng.Pair1(dial=tcp_addr, send_timeout=500) as s1:
-        from _test_util import wait_pipe_len
-
-        wait_pipe_len(s0, 1)
-        listener = s0.listeners[0]
-        assert listener.recv_max_size == s0.recv_max_size
-        # Verify right-sized messages get through
-        small_msg = b"\0" * 50
-        s1.send(small_msg)
-        assert s0.recv() == small_msg
-        # Verify oversized messages are dropped
-        big_msg = b"\0" * 101
-        s1.send(big_msg)
-        with pytest.raises(pynng.Timeout):
-            s0.recv()
+    ) as s0:
+        actual_addr = "tcp://{}".format(s0.listeners[0].local_address)
+        with pynng.Pair1(dial=actual_addr, send_timeout=500) as s1:
+            wait_pipe_len(s0, 1)
+            listener = s0.listeners[0]
+            assert listener.recv_max_size == s0.recv_max_size
+            # Verify right-sized messages get through
+            small_msg = b"\0" * 50
+            s1.send(small_msg)
+            assert s0.recv() == small_msg
+            # Verify oversized messages are dropped
+            big_msg = b"\0" * 101
+            s1.send(big_msg)
+            with pytest.raises(pynng.Timeout):
+                s0.recv()
 
 
 def test_nng_sockaddr():
     with pynng.Pair1(recv_timeout=50, listen=tcp_addr) as s0:
         sa = s0.listeners[0].local_address
         assert isinstance(sa, pynng.sockaddr.InAddr)
-        # big-endian
-        expected_port = (PORT >> 8) | ((PORT & 0xFF) << 8)
-        assert sa.port == expected_port
-        # big-endian
-        ip_parts = [int(x) for x in IP.split(".")]
-        expected_addr = (
-            ip_parts[0] | ip_parts[1] << 8 | ip_parts[2] << 16 | ip_parts[3] << 24
-        )
+        # port is in network byte order (big-endian); verify it was assigned
+        assigned_port = socket.ntohs(sa.port)
+        assert assigned_port > 0
+        # addr is big-endian 127.0.0.1
+        expected_addr = 127 | 0 << 8 | 0 << 16 | 1 << 24
         assert expected_addr == sa.addr
-        assert str(sa) == tcp_addr.replace("tcp://", "")
+        assert str(sa) == "127.0.0.1:{}".format(assigned_port)
 
     path = "/tmp/thisisipc"
     with pynng.Pair1(recv_timeout=50, listen="ipc://{}".format(path)) as s0:
@@ -101,12 +101,14 @@ def test_nng_sockaddr():
     if Path("/.dockerenv").exists():
         return
 
-    ipv6 = "tcp://[::1]:13131"
+    ipv6 = "tcp://[::1]:0"
     with pynng.Pair1(recv_timeout=50, listen=ipv6) as s0:
         sa = s0.listeners[0].local_address
         assert isinstance(sa, pynng.sockaddr.In6Addr)
         assert sa.addr == b"\x00" * 15 + b"\x01"
-        assert str(sa) == ipv6.replace("tcp://", "")
+        assigned_port = socket.ntohs(sa.port)
+        assert assigned_port > 0
+        assert str(sa) == "[::1]:{}".format(assigned_port)
 
 
 def test_resend_time():
@@ -148,3 +150,26 @@ def test_pointer_option_is_writeonly():
     with pynng.Pair0() as s:
         with pytest.raises(TypeError):
             _ = s.tls_config
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="select.select() may not work with NNG fds on Windows")
+def test_recv_send_fd():
+    """Test recv_fd and send_fd return valid file descriptors for polling."""
+    import select
+    from _test_util import wait_pipe_len
+    addr = "inproc://test-recv-send-fd"
+    with pynng.Pair0(listen=addr, recv_timeout=5000) as s0, \
+         pynng.Pair0(dial=addr) as s1:
+        wait_pipe_len(s0, 1)
+        fd = s0.recv_fd
+        assert isinstance(fd, int)
+        assert fd >= 0
+        sfd = s0.send_fd
+        assert isinstance(sfd, int)
+        assert sfd >= 0
+        # Functional: send data, then poll recv_fd for readability
+        s1.send(b"hello")
+        readable, _, _ = select.select([s0.recv_fd], [], [], 5.0)
+        assert readable, "recv_fd was not readable after peer sent data"
+        data = s0.recv()
+        assert data == b"hello"
