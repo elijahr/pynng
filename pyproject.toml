@@ -92,7 +92,7 @@ environment = { PATH = "C:\\Program Files\\LLVM\\bin;$PATH" }
 # Specify universal2 building for macOS
 archs = ["universal2"]
 before-build = "pip install 'headerkit>=0.7.1' && python -m headerkit.install_libclang --skip-verify"
-before-test = "python -m headerkit.install_libclang --skip-verify"
+before-test = "pip install 'headerkit>=0.7.1' && python -m headerkit.install_libclang --skip-verify"
 environment = { CMAKE_OSX_ARCHITECTURES = "x86_64;arm64" }
 
 [tool.pytest.ini_options]
