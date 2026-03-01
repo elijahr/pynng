@@ -828,7 +828,7 @@ async def test_rapid_open_close_trio():
                 nonlocal got_closed
                 try:
                     await sock.arecv()
-                except (pynng.Closed, pynng.Timeout):
+                except pynng.Closed:
                     got_closed = True
 
             async def close_soon():
@@ -854,7 +854,7 @@ async def test_rapid_open_close_asyncio():
             nonlocal got_closed
             try:
                 await sock.arecv()
-            except (pynng.Closed, pynng.Timeout):
+            except pynng.Closed:
                 got_closed = True
 
         async def close_soon():
@@ -885,7 +885,7 @@ async def test_rapid_open_close_with_connected_peer_trio():
                 nonlocal got_exception
                 try:
                     await listener.arecv()
-                except (pynng.Closed, pynng.Timeout):
+                except pynng.Closed:
                     got_exception = True
 
             async def close_soon():
@@ -914,7 +914,7 @@ async def test_rapid_open_close_with_connected_peer_asyncio():
             nonlocal got_exception
             try:
                 await listener.arecv()
-            except (pynng.Closed, pynng.Timeout):
+            except pynng.Closed:
                 got_exception = True
 
         async def close_soon():

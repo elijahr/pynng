@@ -99,6 +99,7 @@ async def test_pub_sub_trio():
         with pynng.Sub0(dial=addr, recv_timeout=5000) as subber:
             subber.subscribe(which + ":")
 
+            data_count = 0
             while True:
                 val = await subber.arecv()
 
@@ -108,7 +109,9 @@ async def test_pub_sub_trio():
                     break
 
                 assert pred(int(i))
+                data_count += 1
 
+            assert data_count > 0, f"{which} subscriber received no data messages"
             # mark subscriber as having received None sentinel
             sentinel_received[which] = True
 
