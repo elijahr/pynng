@@ -195,13 +195,15 @@ def test_can_instantiate_socket_with_raw_opener():
 
 def test_can_pass_addr_as_bytes_or_str():
     with pynng.Pair0(
-        listen=b"tcp://127.0.0.1:42421", recv_timeout=1000
-    ) as s0, pynng.Pair0(
-        dial="tcp://127.0.0.1:42421", recv_timeout=1000
-    ) as s1:
-        wait_pipe_len(s0, 1)
-        s1.send(b"hello from str dial")
-        assert s0.recv() == b"hello from str dial"
+        listen=b"tcp://127.0.0.1:0", recv_timeout=1000
+    ) as s0:
+        actual_addr = "tcp://{}".format(s0.listeners[0].local_address)
+        with pynng.Pair0(
+            dial=actual_addr, recv_timeout=1000
+        ) as s1:
+            wait_pipe_len(s0, 1)
+            s1.send(b"hello from str dial")
+            assert s0.recv() == b"hello from str dial"
 
 
 def test_socket_protocol_properties():
