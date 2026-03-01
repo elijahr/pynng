@@ -547,7 +547,8 @@ class Socket:
     @property
     def pipes(self):
         """A list of the active pipes"""
-        return tuple(self._pipes.values())
+        with self._pipe_notify_lock:
+            return tuple(self._pipes.values())
 
     def _add_pipe(self, lib_pipe):
         # this is only called inside the pipe callback.
