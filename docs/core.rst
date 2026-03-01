@@ -2,9 +2,17 @@
 Pynng's core functionality
 ==========================
 
-At the heart of pynng is the :class:`pynng.Socket`.  It takes no positional
-arguments, and all keyword arguments are optional.  It is the Python version of
-`nng_socket <https://nanomsg.github.io/nng/man/tip/nng_socket.5.html>`_.
+.. note::
+
+   This page has been split into dedicated sections. Please see:
+
+   - :doc:`api/sockets` for Socket and protocol class reference
+   - :doc:`api/messaging` for Message and Context reference
+   - :doc:`api/networking` for Dialer, Listener, and Pipe reference
+   - :doc:`api/tls` for TLS configuration reference
+   - :doc:`async` for async usage patterns (``async with``, ``async for``, ``aclose()``)
+
+The content below is preserved for backward compatibility with existing links.
 
 ----------
 The Socket
@@ -16,13 +24,20 @@ The Socket
     should instantiate one of the :ref:`subclasses <available-protocols>`.
 
 .. autoclass:: pynng.Socket(*, listen=None, dial=None, **kwargs)
-   :members: listen, dial, send, recv, asend, arecv, recv_msg, arecv_msg, new_context
+   :members: listen, dial, send, recv, asend, arecv, recv_msg, arecv_msg, new_context, aclose
 
 Feel free to peruse the `examples online
 <https://github.com/codypiersall/pynng/tree/master/examples>`_, or ask in the
 `gitter channel <https://gitter.im/nanomsg/nanomsg>`_.
 
-.. _available-protocols :
+.. _async-ergonomics:
+
+Async Ergonomics
+----------------
+
+See :doc:`async` for full async usage documentation.
+
+.. _available-protocols:
 
 ###################
 Available Protocols
@@ -53,7 +68,7 @@ Context
 -------
 
 .. autoclass:: pynng.Context(...)
-   :members: send, asend, recv, arecv, recv_msg, arecv_msg, close
+   :members: send, asend, recv, arecv, recv_msg, arecv_msg, close, aclose
 
 -------
 Message
@@ -151,4 +166,6 @@ The name assigned can be retrieved using the ``NNG_OPT_LOCADDR`` option.
         # The address can be used for dialing from another process
         # dialer = sock.dial("abstract://my_test_socket")
 
-For a complete example, see :doc:`../examples/abstract`.
+For a complete example, see `abstract.py <https://github.com/codypiersall/pynng/blob/master/examples/abstract.py>`_.
+
+.. _Trio: https://trio.readthedocs.io
