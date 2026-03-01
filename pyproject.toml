@@ -67,7 +67,9 @@ version_file = "pynng/_version.py"
 
 [tool.cibuildwheel]
 test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio", "headerkit>=0.7.1"]
-test-command = "pytest {project}/test"
+# test_build.py tests the build system (header parsing via libclang), not the installed wheel.
+# It runs in smoketest (source checkout with build deps); cibuildwheel tests the installed wheel.
+test-command = "pytest {project}/test --ignore={project}/test/test_build.py"
 
 # cp314t-win*: https://github.com/python/cpython/issues/127294
 # *-win32: 32-bit Python can't load 64-bit libclang during build
@@ -92,7 +94,7 @@ environment = { PATH = "C:\\Program Files\\LLVM\\bin;$PATH" }
 # Specify universal2 building for macOS
 archs = ["universal2"]
 before-build = "pip install 'headerkit>=0.7.1' && python -m headerkit.install_libclang --skip-verify"
-before-test = "pip install 'headerkit>=0.7.1' && python -m headerkit.install_libclang --skip-verify"
+
 environment = { CMAKE_OSX_ARCHITECTURES = "x86_64;arm64" }
 
 [tool.pytest.ini_options]
