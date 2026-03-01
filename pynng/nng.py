@@ -87,7 +87,7 @@ class _NNGOption:
     def __get__(self, instance, owner):
         # have to look up the getter on the class
         if self._getter is None:
-            raise TypeError("{} cannot be set".format(self.__class__))
+            raise TypeError("{} is write-only".format(self.__class__))
         return self.__class__._getter(instance, self.option)
 
     def __set__(self, instance, value):
@@ -1640,10 +1640,13 @@ class Message:
 
         """
         with self._mem_freed_lock:
-            if not self._mem_freed:
-                size = lib.nng_msg_len(self._nng_msg)
-                data = ffi.cast("char *", lib.nng_msg_body(self._nng_msg))
-                return ffi.buffer(data[0:size])
+            if self._mem_freed:
+                raise pynng.MessageStateError(
+                    "Message buffer is no longer available after sending."
+                )
+            size = lib.nng_msg_len(self._nng_msg)
+            data = ffi.cast("char *", lib.nng_msg_body(self._nng_msg))
+            return ffi.buffer(data[0:size])
 
     @property
     def bytes(self):
