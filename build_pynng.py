@@ -14,8 +14,14 @@ and constants are made available. The ffibuilder setup only runs when executed
 by cffi_buildtool (which sets __name__ to "gen-cffi-src") or directly.
 """
 
+import glob
+import logging
 import os
 import re
+import subprocess
+import sys
+
+logger = logging.getLogger(__name__)
 
 
 NNG_HEADERS = [
@@ -38,17 +44,164 @@ NNG_HEADERS = [
 EXCLUDE_PATTERNS = [r"nng_tls_config_(pass|key)"]
 
 
+def _validate_nng_include_dir(path: str) -> str | None:
+    """Return path if it contains nng/nng.h, else None."""
+    if os.path.isfile(os.path.join(path, "nng", "nng.h")):
+        return path
+    return None
+
+
+def _detect_env_var() -> str | None:
+    """Strategy 1: NNG_INCLUDE_DIR environment variable."""
+    val = os.environ.get("NNG_INCLUDE_DIR")
+    if val:
+        result = _validate_nng_include_dir(val)
+        if result:
+            logger.debug("NNG headers found via NNG_INCLUDE_DIR env var: %s", result)
+        else:
+            logger.debug(
+                "NNG_INCLUDE_DIR set to %s but nng/nng.h not found there", val
+            )
+        return result
+    return None
+
+
+def _detect_build_tree() -> str | None:
+    """Strategy 2: scikit-build-core FetchContent build cache."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    candidates = glob.glob(
+        os.path.join(project_root, "build", "*", "_deps", "nng-src", "include")
+    )
+    for candidate in candidates:
+        result = _validate_nng_include_dir(candidate)
+        if result:
+            logger.debug("NNG headers found in build tree: %s", result)
+            return result
+    return None
+
+
+def _detect_pkg_config() -> str | None:
+    """Strategy 3: pkg-config --cflags nng."""
+    try:
+        output = subprocess.run(
+            ["pkg-config", "--cflags", "nng"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if output.returncode == 0:
+            for flag in output.stdout.strip().split():
+                if flag.startswith("-I"):
+                    path = flag[2:]
+                    result = _validate_nng_include_dir(path)
+                    if result:
+                        logger.debug("NNG headers found via pkg-config: %s", result)
+                        return result
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        logger.debug("pkg-config not available or timed out")
+    return None
+
+
+def _detect_system_paths() -> str | None:
+    """Strategy 4: Common system include paths."""
+    paths = ["/usr/include", "/usr/local/include"]
+    for path in paths:
+        result = _validate_nng_include_dir(path)
+        if result:
+            logger.debug("NNG headers found in system path: %s", result)
+            return result
+    return None
+
+
+def _detect_homebrew() -> str | None:
+    """Strategy 5: macOS Homebrew."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        output = subprocess.run(
+            ["brew", "--prefix", "nng"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if output.returncode == 0:
+            prefix = output.stdout.strip()
+            include_path = os.path.join(prefix, "include")
+            result = _validate_nng_include_dir(include_path)
+            if result:
+                logger.debug("NNG headers found via Homebrew: %s", result)
+                return result
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        logger.debug("brew command not available or timed out")
+
+    # Fallback: check common Homebrew prefix paths directly
+    for prefix in ["/opt/homebrew", "/usr/local"]:
+        include_path = os.path.join(prefix, "include")
+        result = _validate_nng_include_dir(include_path)
+        if result:
+            logger.debug("NNG headers found in Homebrew prefix: %s", result)
+            return result
+    return None
+
+
+def _detect_macports() -> str | None:
+    """Strategy 6: macOS MacPorts."""
+    if sys.platform != "darwin":
+        return None
+    result = _validate_nng_include_dir("/opt/local/include")
+    if result:
+        logger.debug("NNG headers found via MacPorts: %s", result)
+    return result
+
+
+def find_nng_include_dir() -> str | None:
+    """Auto-detect the NNG include directory using a cascade of strategies.
+
+    Tries the following in order, returning the first valid path found:
+      1. NNG_INCLUDE_DIR environment variable
+      2. Build tree (scikit-build-core FetchContent cache)
+      3. pkg-config
+      4. Common system include paths (/usr/include, /usr/local/include)
+      5. macOS Homebrew (brew --prefix nng, then common prefixes)
+      6. macOS MacPorts (/opt/local/include)
+
+    Each candidate is validated by checking for the existence of nng/nng.h.
+
+    Returns:
+        The path to the NNG include directory, or None if not found.
+    """
+    strategies = [
+        ("env_var", _detect_env_var),
+        ("build_tree", _detect_build_tree),
+        ("pkg_config", _detect_pkg_config),
+        ("system_paths", _detect_system_paths),
+        ("homebrew", _detect_homebrew),
+        ("macports", _detect_macports),
+    ]
+    for name, strategy in strategies:
+        result = strategy()
+        if result is not None:
+            return result
+        logger.debug("Strategy '%s' did not find NNG headers", name)
+    logger.debug("No NNG headers found by any strategy")
+    return None
+
+
 def _get_nng_include_dir() -> str:
-    """Read NNG_INCLUDE_DIR from the environment.
+    """Detect the NNG include directory.
+
+    Uses the auto-detection cascade (env var, build tree, pkg-config,
+    system paths, Homebrew, MacPorts).
 
     Raises:
-        RuntimeError: If NNG_INCLUDE_DIR is not set.
+        RuntimeError: If NNG headers cannot be found by any strategy.
     """
-    include_dir = os.environ.get("NNG_INCLUDE_DIR")
+    include_dir = find_nng_include_dir()
     if include_dir is None:
         raise RuntimeError(
-            "NNG_INCLUDE_DIR environment variable must be set. "
-            "This is normally set by the CMake build system."
+            "Cannot find NNG headers. Set NNG_INCLUDE_DIR environment "
+            "variable, install NNG development headers, or build first. "
+            "During cmake builds, NNG_INCLUDE_DIR is set automatically."
         )
     return include_dir
 
