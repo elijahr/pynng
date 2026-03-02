@@ -143,6 +143,7 @@ def test_post_pipe_connect_cb_works():
         while later > time.time():
             if post_called:
                 break
+            time.sleep(0.0005)
         assert post_called
 
 
@@ -164,6 +165,7 @@ def test_post_pipe_remove_cb_works():
     while later > time.time():
         if post_called:
             break
+        time.sleep(0.0005)
     assert post_called
 
 
@@ -212,6 +214,7 @@ def test_bad_callbacks_dont_cause_extra_failures():
             while later > time.time():
                 if called_pre_connect:
                     break
+                time.sleep(0.0005)
             assert called_pre_connect
 
 

@@ -46,7 +46,11 @@ class TestFFICoreTypes:
     )
     def test_ffi_knows_core_types(self, type_name):
         # ffi.typeof raises FFIError if the type is unknown
-        ffi.typeof(type_name)
+        result = ffi.typeof(type_name)
+        assert result is not None
+        assert result.kind in ("struct", "union"), (
+            "Expected struct or union for {}, got {}".format(type_name, result.kind)
+        )
 
     @pytest.mark.parametrize(
         "type_name",
@@ -61,7 +65,11 @@ class TestFFICoreTypes:
         ],
     )
     def test_ffi_knows_pointer_types(self, type_name):
-        ffi.typeof(type_name)
+        result = ffi.typeof(type_name)
+        assert result is not None
+        assert result.kind == "pointer", (
+            "Expected pointer for {}, got {}".format(type_name, result.kind)
+        )
 
 
 class TestFFICoreFunctions:

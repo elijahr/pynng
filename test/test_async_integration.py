@@ -237,20 +237,24 @@ async def test_reqrep_concurrent_contexts_trio():
 
         async def client(idx):
             ctx_req = req_sock.new_context()
-            request = "request-{}".format(idx).encode()
-            await ctx_req.asend(request)
-            response = await ctx_req.arecv()
-            results[idx] = response
-            ctx_req.close()
+            try:
+                request = "request-{}".format(idx).encode()
+                await ctx_req.asend(request)
+                response = await ctx_req.arecv()
+                results[idx] = response
+            finally:
+                ctx_req.close()
 
         async def server():
             for _ in range(num_clients):
                 ctx_rep = rep_sock.new_context()
-                data = await ctx_rep.arecv()
-                # Echo back with a "reply-" prefix, stripping "request-"
-                reply = data.replace(b"request-", b"reply-")
-                await ctx_rep.asend(reply)
-                ctx_rep.close()
+                try:
+                    data = await ctx_rep.arecv()
+                    # Echo back with a "reply-" prefix, stripping "request-"
+                    reply = data.replace(b"request-", b"reply-")
+                    await ctx_rep.asend(reply)
+                finally:
+                    ctx_rep.close()
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(server)
@@ -276,19 +280,23 @@ async def test_reqrep_concurrent_contexts_asyncio():
 
         async def client(idx):
             ctx_req = req_sock.new_context()
-            request = "request-{}".format(idx).encode()
-            await ctx_req.asend(request)
-            response = await ctx_req.arecv()
-            results[idx] = response
-            ctx_req.close()
+            try:
+                request = "request-{}".format(idx).encode()
+                await ctx_req.asend(request)
+                response = await ctx_req.arecv()
+                results[idx] = response
+            finally:
+                ctx_req.close()
 
         async def server():
             for _ in range(num_clients):
                 ctx_rep = rep_sock.new_context()
-                data = await ctx_rep.arecv()
-                reply = data.replace(b"request-", b"reply-")
-                await ctx_rep.asend(reply)
-                ctx_rep.close()
+                try:
+                    data = await ctx_rep.arecv()
+                    reply = data.replace(b"request-", b"reply-")
+                    await ctx_rep.asend(reply)
+                finally:
+                    ctx_rep.close()
 
         await asyncio.gather(
             server(),
@@ -778,6 +786,10 @@ async def test_async_for_close_mid_stream_trio():
     pusher.close()
 
     assert len(received) == 3
+    for i, msg in enumerate(received):
+        assert msg == "msg-{}".format(i).encode(), (
+            "Message {} content mismatch: got {!r}".format(i, msg)
+        )
 
 
 @pytest.mark.asyncio
@@ -805,6 +817,10 @@ async def test_async_for_close_mid_stream_asyncio():
     pusher.close()
 
     assert len(received) == 3
+    for i, msg in enumerate(received):
+        assert msg == "msg-{}".format(i).encode(), (
+            "Message {} content mismatch: got {!r}".format(i, msg)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1012,3 +1028,122 @@ async def test_alternating_sync_async_asyncio():
                 assert result == "sync-{}".format(i).encode()
             else:
                 assert result == "async-{}".format(i).encode()
+
+
+# ---------------------------------------------------------------------------
+# 9. Operations on closed sockets
+# ---------------------------------------------------------------------------
+
+@pytest.mark.trio
+async def test_send_recv_on_closed_socket_raises_trio():
+    """Verify that send/recv on a closed socket raises pynng.Closed."""
+    addr = _unique_addr("closed-sock-trio")
+    s = pynng.Pair0(listen=addr, recv_timeout=1000, send_timeout=1000)
+    s.close()
+
+    with pytest.raises(pynng.Closed):
+        s.send(b"test")
+
+    with pytest.raises(pynng.Closed):
+        s.recv()
+
+    with pytest.raises(pynng.Closed):
+        await s.asend(b"test")
+
+    with pytest.raises(pynng.Closed):
+        await s.arecv()
+
+
+@pytest.mark.asyncio
+async def test_send_recv_on_closed_socket_raises_asyncio():
+    """Verify that send/recv on a closed socket raises pynng.Closed."""
+    addr = _unique_addr("closed-sock-asyncio")
+    s = pynng.Pair0(listen=addr, recv_timeout=1000, send_timeout=1000)
+    s.close()
+
+    with pytest.raises(pynng.Closed):
+        s.send(b"test")
+
+    with pytest.raises(pynng.Closed):
+        s.recv()
+
+    with pytest.raises(pynng.Closed):
+        await s.asend(b"test")
+
+    with pytest.raises(pynng.Closed):
+        await s.arecv()
+
+
+# ---------------------------------------------------------------------------
+# 10. Double-close safety
+# ---------------------------------------------------------------------------
+
+def test_double_close_socket_is_safe():
+    """Verify closing a socket twice does not raise."""
+    addr = _unique_addr("dbl-close-sock")
+    s = pynng.Pair0(listen=addr)
+    s.close()
+    s.close()  # Should not raise
+
+
+def test_double_close_context_is_safe():
+    """Verify closing a context twice does not raise."""
+    addr = _unique_addr("dbl-close-ctx")
+    with pynng.Req0(listen=addr) as s:
+        ctx = s.new_context()
+        ctx.close()
+        ctx.close()  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# 11. Async send on closed socket
+# ---------------------------------------------------------------------------
+
+@pytest.mark.trio
+async def test_asend_on_closed_socket_trio():
+    """Verify asend on a closed socket raises pynng.Closed."""
+    addr = _unique_addr("asend-closed-trio")
+    with pynng.Pair0(listen=addr, send_timeout=1000) as s:
+        pass  # socket closed after with block
+
+    with pytest.raises(pynng.Closed):
+        await s.asend(b"test")
+
+
+@pytest.mark.asyncio
+async def test_asend_on_closed_socket_asyncio():
+    """Verify asend on a closed socket raises pynng.Closed."""
+    addr = _unique_addr("asend-closed-asyncio")
+    with pynng.Pair0(listen=addr, send_timeout=1000) as s:
+        pass  # socket closed after with block
+
+    with pytest.raises(pynng.Closed):
+        await s.asend(b"test")
+
+
+# ---------------------------------------------------------------------------
+# 12. Zero-length message
+# ---------------------------------------------------------------------------
+
+@pytest.mark.trio
+async def test_send_recv_empty_message_trio():
+    """Verify empty messages can be sent and received."""
+    addr = _unique_addr("empty-msg-trio")
+    with pynng.Pair0(listen=addr, recv_timeout=3000) as s0:
+        with pynng.Pair0(dial=addr, send_timeout=3000) as s1:
+            wait_pipe_len(s0, 1)
+            await s1.asend(b"")
+            result = await s0.arecv()
+            assert result == b""
+
+
+@pytest.mark.asyncio
+async def test_send_recv_empty_message_asyncio():
+    """Verify empty messages can be sent and received."""
+    addr = _unique_addr("empty-msg-asyncio")
+    with pynng.Pair0(listen=addr, recv_timeout=3000) as s0:
+        with pynng.Pair0(dial=addr, send_timeout=3000) as s1:
+            wait_pipe_len(s0, 1)
+            await s1.asend(b"")
+            result = await s0.arecv()
+            assert result == b""

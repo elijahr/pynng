@@ -9,6 +9,7 @@ Covers:
 """
 
 import asyncio
+import unittest.mock
 
 import pytest
 import trio
@@ -110,6 +111,33 @@ async def test_socket_async_for_stops_on_close_trio():
     assert received == [b"hello"]
 
 
+@pytest.mark.asyncio
+async def test_socket_async_for_stops_on_close_asyncio():
+    """async for stops cleanly when socket is closed externally (asyncio)."""
+    addr = "inproc://test-socket-aiter-close-asyncio"
+    received = []
+
+    pusher = pynng.Push0(listen=addr, send_timeout=2000)
+    puller = pynng.Pull0(dial=addr, recv_timeout=5000)
+    try:
+        async def send_and_close():
+            await pusher.asend(b"hello")
+            await asyncio.sleep(0.1)
+            puller.close()
+
+        task = asyncio.ensure_future(send_and_close())
+
+        async for msg in puller:
+            received.append(msg)
+
+        await task
+    finally:
+        puller.close()
+        pusher.close()
+
+    assert received == [b"hello"]
+
+
 # ---------------------------------------------------------------------------
 # Socket: async with
 # ---------------------------------------------------------------------------
@@ -131,8 +159,12 @@ async def test_socket_async_with_trio():
 async def test_socket_async_with_asyncio():
     """async with on a socket closes it on exit with asyncio."""
     addr = "inproc://test-socket-acm-asyncio"
-    async with pynng.Pair0(listen=addr) as s:
+    async with pynng.Pair0(listen=addr, recv_timeout=1000) as s:
         assert isinstance(s, pynng.Socket)
+        async with pynng.Pair0(dial=addr, send_timeout=1000) as d:
+            await d.asend(b"hi")
+            assert await s.arecv() == b"hi"
+    # After exiting, socket should be closed (listeners cleared)
     assert len(s._listeners) == 0
 
 
@@ -269,6 +301,37 @@ async def test_context_async_for_stops_on_close_trio():
     assert received == [b"msg"]
 
 
+@pytest.mark.asyncio
+async def test_context_async_for_stops_on_close_asyncio():
+    """async for on a context stops when the parent socket is closed (asyncio)."""
+    addr = "inproc://test-ctx-aiter-close-asyncio"
+    received = []
+
+    rep_sock = pynng.Rep0(listen=addr, recv_timeout=5000)
+    req_sock = pynng.Req0(dial=addr, send_timeout=2000)
+    try:
+        ctx = rep_sock.new_context()
+
+        async def send_and_close():
+            await req_sock.asend(b"msg")
+            await asyncio.sleep(0.1)
+            # Closing the parent socket causes the context's arecv to get
+            # a Closed exception, which stops async iteration.
+            rep_sock.close()
+
+        task = asyncio.ensure_future(send_and_close())
+
+        async for msg in ctx:
+            received.append(msg)
+
+        await task
+    finally:
+        req_sock.close()
+        rep_sock.close()
+
+    assert received == [b"msg"]
+
+
 # ---------------------------------------------------------------------------
 # Context: async with
 # ---------------------------------------------------------------------------
@@ -298,7 +361,13 @@ async def test_context_async_with_asyncio():
          pynng.Rep0(dial=addr, recv_timeout=1000) as rep_sock:
         async with req_sock.new_context() as ctx_req:
             assert isinstance(ctx_req, pynng.Context)
-        assert ctx_req._context is None
+            async with rep_sock.new_context() as ctx_rep:
+                await ctx_req.asend(b"hello")
+                assert await ctx_rep.arecv() == b"hello"
+                await ctx_rep.asend(b"world")
+                assert await ctx_req.arecv() == b"world"
+            # ctx_rep should be closed now
+            assert ctx_rep._context is None
 
 
 # ---------------------------------------------------------------------------
@@ -356,12 +425,17 @@ def test_aio_map_pop_defensive():
 async def test_asyncio_uses_running_loop():
     """Verify asyncio_helper calls get_running_loop (not get_event_loop).
 
-    This is implicitly tested by all asyncio tests succeeding, but we add
-    an explicit check that the code path works from inside a running loop.
+    Patches get_event_loop at the pynng._aio module level to raise if called,
+    ensuring that the code path uses get_running_loop instead.
     """
     addr = "inproc://test-running-loop"
-    with pynng.Pair0(listen=addr, recv_timeout=1000) as listener, \
-         pynng.Pair0(dial=addr, send_timeout=1000) as dialer:
-        await dialer.asend(b"running-loop-test")
-        result = await listener.arecv()
-        assert result == b"running-loop-test"
+    with unittest.mock.patch.object(
+        _aio.asyncio,
+        "get_event_loop",
+        side_effect=AssertionError("get_event_loop should not be called"),
+    ):
+        with pynng.Pair0(listen=addr, recv_timeout=1000) as listener, \
+             pynng.Pair0(dial=addr, send_timeout=1000) as dialer:
+            await dialer.asend(b"running-loop-test")
+            result = await listener.arecv()
+            assert result == b"running-loop-test"

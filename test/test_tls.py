@@ -1,3 +1,5 @@
+import gc
+
 import pytest
 
 import pynng
@@ -120,44 +122,112 @@ def test_config_file(tmp_path):
 
 
 def test_tls_config_ca_mutual_exclusion():
-    """Cannot set both ca_string and ca_files"""
+    """Cannot set both ca_string and ca_files."""
+    # ValueError is raised before NNG allocation, so no TLSConfig is created.
     with pytest.raises(ValueError, match="Cannot set both ca_string and ca_files"):
         TLSConfig(TLSConfig.MODE_CLIENT, ca_string="cert", ca_files=["file.pem"])
+    gc.collect()
 
 
 def test_tls_config_own_cert_mutual_exclusion():
-    """Cannot set both own_cert_string/own_key_string and cert_key_file"""
+    """Cannot set both own_cert_string/own_key_string and cert_key_file."""
     with pytest.raises(ValueError, match="Cannot set both"):
         TLSConfig(TLSConfig.MODE_SERVER,
                   own_cert_string="cert", own_key_string="key",
                   cert_key_file="file.pem")
+    gc.collect()
 
 
 def test_tls_config_own_cert_both_required():
-    """own_cert_string and own_key_string must both be set or both unset"""
+    """own_cert_string and own_key_string must both be set or both unset."""
     with pytest.raises(ValueError, match="must be both set"):
         TLSConfig(TLSConfig.MODE_SERVER, own_cert_string="cert")
     with pytest.raises(ValueError, match="must be both set"):
         TLSConfig(TLSConfig.MODE_SERVER, own_key_string="key")
+    gc.collect()
+
+
+def test_tls_set_server_name_none():
+    """Verify set_server_name(None) is handled without error.
+
+    The implementation passes ffi.NULL to NNG when server_name is None,
+    which clears any previously set server name.
+    """
+    config = TLSConfig(TLSConfig.MODE_CLIENT)
+    try:
+        # Should not raise -- None is converted to ffi.NULL internally
+        config.set_server_name(None)
+    finally:
+        del config
+        gc.collect()
 
 
 def test_tls_auth_mode():
-    config = TLSConfig(TLSConfig.MODE_CLIENT)
-    config.set_auth_mode(TLSConfig.AUTH_MODE_NONE)
-    config.set_auth_mode(TLSConfig.AUTH_MODE_OPTIONAL)
-    config.set_auth_mode(TLSConfig.AUTH_MODE_REQUIRED)
-    # NNG has no getter for auth_mode, so we verify set_auth_mode
-    # does not raise for valid modes (it calls check_err internally).
-    # Invalid auth mode: negative values cause OverflowError at CFFI level
-    # (unsigned int), large positive values cause NNGException from NNG
-    with pytest.raises(OverflowError):
-        config.set_auth_mode(-999)
-    with pytest.raises(pynng.NNGException):
-        config.set_auth_mode(9999)
+    """Test TLSConfig.set_auth_mode with valid and invalid values."""
+    config = TLSConfig(
+        TLSConfig.MODE_SERVER,
+        own_cert_string=SERVER_CERT,
+        own_key_string=SERVER_KEY,
+    )
+    try:
+        # Valid modes should not raise, and the resulting config should be
+        # usable on a real socket.  NNG has no getter for auth_mode, so we
+        # verify each mode is accepted at the NNG level by applying it to a
+        # listener-capable socket.
+        for mode in (
+            TLSConfig.AUTH_MODE_NONE,
+            TLSConfig.AUTH_MODE_OPTIONAL,
+            TLSConfig.AUTH_MODE_REQUIRED,
+        ):
+            config.set_auth_mode(mode)
+
+            # Build a fresh config with this mode and apply it to a socket,
+            # confirming the mode value is accepted end-to-end.
+            tls = TLSConfig(
+                TLSConfig.MODE_SERVER,
+                own_cert_string=SERVER_CERT,
+                own_key_string=SERVER_KEY,
+                auth_mode=mode,
+            )
+            with Pair0() as s:
+                s.tls_config = tls
+
+        # Invalid auth mode: negative values cause OverflowError at CFFI level
+        # (unsigned int), large positive values cause NNGException from NNG
+        with pytest.raises(OverflowError):
+            config.set_auth_mode(-999)
+        with pytest.raises(pynng.NNGException):
+            config.set_auth_mode(9999)
+    finally:
+        del config
+        gc.collect()
 
 
 def test_tls_auth_mode_in_constructor():
-    # AUTH_MODE_NONE has value 0; tests the "if auth_mode is not None:" fix
-    for mode in (TLSConfig.AUTH_MODE_NONE, TLSConfig.AUTH_MODE_OPTIONAL, TLSConfig.AUTH_MODE_REQUIRED):
-        config = TLSConfig(TLSConfig.MODE_CLIENT, auth_mode=mode)
-        assert isinstance(config, TLSConfig)
+    """Verify auth_mode parameter in constructor works for all valid values.
+
+    AUTH_MODE_NONE has integer value 0, which is falsy.  This exercises
+    the ``if auth_mode is not None:`` guard (not ``if auth_mode:``).
+    """
+    for mode in (
+        TLSConfig.AUTH_MODE_NONE,      # value 0 -- falsy!
+        TLSConfig.AUTH_MODE_OPTIONAL,   # value 1
+        TLSConfig.AUTH_MODE_REQUIRED,   # value 2
+    ):
+        config = TLSConfig(
+            TLSConfig.MODE_SERVER,
+            own_cert_string=SERVER_CERT,
+            own_key_string=SERVER_KEY,
+            auth_mode=mode,
+        )
+        try:
+            # Verify config was allocated and is usable.
+            # NNG has no auth_mode getter, so we confirm the internal pointer
+            # is live and the config can be applied to a socket without error.
+            assert config._tls_config is not None, "TLS config should be allocated"
+            with Pair0() as s:
+                s.tls_config = config
+        finally:
+            del config
+
+    gc.collect()
