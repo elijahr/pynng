@@ -227,6 +227,20 @@ def test_socket_protocol_properties(socket_cls, expected_name, expected_peer):
         assert s.protocol > 0
         assert isinstance(s.peer, int)
         assert s.peer > 0
+        if expected_name == expected_peer:
+            # Self-peering protocols (pair, bus) have the same protocol
+            # and peer IDs
+            assert s.protocol == s.peer, (
+                f"{expected_name}: expected protocol == peer, "
+                f"got {s.protocol} != {s.peer}"
+            )
+        else:
+            # Asymmetric protocols (req/rep, pub/sub, etc.) must have
+            # distinct protocol and peer IDs
+            assert s.protocol != s.peer, (
+                f"{expected_name}: expected protocol != peer, "
+                f"got {s.protocol} == {s.peer}"
+            )
 
 
 def test_buffer_size_options():

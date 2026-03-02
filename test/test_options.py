@@ -1,3 +1,4 @@
+import os
 import socket
 import sys
 
@@ -5,6 +6,7 @@ import pynng
 import pynng.options
 import pytest
 from pathlib import Path
+from _test_util import wait_pipe_len
 
 tcp_addr = "tcp://127.0.0.1:0"
 addr = "inproc://test-addr"
@@ -40,13 +42,14 @@ def test_can_read_sock_raw():
 def test_dial_blocking_behavior():
     # the default dial is different than the pynng library; it will log in the
     # event of a failure, but then continue.
-    with pynng.Pair1() as s0, pynng.Pair1() as s1:
+    with pynng.Pair1() as s0, pynng.Pair1(recv_timeout=3000) as s1:
         with pytest.raises(pynng.ConnectionRefused):
             s0.dial(addr, block=True)
 
         # default is to attempt
         s0.dial(addr)
         s1.listen(addr)
+        wait_pipe_len(s0, 1)
         s0.send(b"what a message")
         assert s1.recv() == b"what a message"
 
@@ -91,6 +94,10 @@ def test_nng_sockaddr():
         assert isinstance(sa, pynng.sockaddr.IPCAddr)
         assert sa.path == path
         assert str(sa) == path
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
     url = "inproc://thisisinproc"
     with pynng.Pair1(recv_timeout=50, listen=url) as s0:
@@ -99,7 +106,7 @@ def test_nng_sockaddr():
 
     # skip ipv6 test when running in Docker
     if Path("/.dockerenv").exists():
-        return
+        pytest.skip("IPv6 unavailable in Docker")
 
     ipv6 = "tcp://[::1]:0"
     with pynng.Pair1(recv_timeout=50, listen=ipv6) as s0:

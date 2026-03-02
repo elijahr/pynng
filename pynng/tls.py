@@ -98,8 +98,9 @@ class TLSConfig:
         Configure remote server name.
         """
         if server_name is None:
-            raise ValueError("server_name cannot be None; pass an empty string to clear")
-        server_name_char = pynng.nng.to_char(server_name)
+            server_name_char = pynng.ffi.NULL
+        else:
+            server_name_char = pynng.nng.to_char(server_name)
         err = pynng.lib.nng_tls_config_server_name(self._tls_config, server_name_char)
         pynng.check_err(err)
 

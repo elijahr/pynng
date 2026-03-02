@@ -68,10 +68,10 @@ async def test_asend_trio_send_timeout():
 async def test_pub_sub_trio():
     """Demonstrate pub-sub protocol use with ``trio``.
 
-    Start a publisher which publishes 1000 integers and marks each value
-    as *even* or *odd* (its parity). Spawn 4 subscribers (2 for consuming
-    the evens and 2 for consuming the odds) in separate tasks and have each
-    one retreive values and verify the parity.
+    Start a publisher which publishes 20 integers and marks each value
+    as *even* or *odd* (its parity). Spawn 2 subscribers (1 for consuming
+    the evens and 1 for consuming the odds) in separate tasks and have each
+    one retrieve values and verify the parity.
     """
     sentinel_received = {}
 
@@ -111,7 +111,12 @@ async def test_pub_sub_trio():
                 assert pred(int(i))
                 data_count += 1
 
-            assert data_count > 0, f"{which} subscriber received no data messages"
+            # The publisher sends 20 messages (10 per parity). Even with
+            # pub/sub lossy semantics and subscription propagation delays,
+            # at least 3 should arrive reliably.
+            assert data_count >= 3, (
+                f"{which} subscriber received only {data_count} data messages, expected >= 3"
+            )
             # mark subscriber as having received None sentinel
             sentinel_received[which] = True
 
