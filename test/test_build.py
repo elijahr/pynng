@@ -9,7 +9,6 @@ NNG_INCLUDE_DIR or the build cache), they also test the build functions
 directly.
 """
 
-import glob
 import os
 import re
 import sys
@@ -169,25 +168,13 @@ class TestFFIDefines:
 # These require the NNG include directory to be available (either via env var
 # or auto-detected from the build cache).
 
-_NNG_INCLUDE_DIR = os.environ.get("NNG_INCLUDE_DIR")
-if not _NNG_INCLUDE_DIR:
-    candidates = glob.glob(
-        os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "build",
-            "*",
-            "_deps",
-            "nng-src",
-            "include",
-        )
-    )
-    if candidates:
-        _NNG_INCLUDE_DIR = candidates[0]
+from build_pynng import find_nng_include_dir
+
+_NNG_INCLUDE_DIR = find_nng_include_dir()
 
 _skip_no_headers = pytest.mark.skipif(
     _NNG_INCLUDE_DIR is None,
-    reason="NNG headers not available (set NNG_INCLUDE_DIR or build first)",
+    reason="NNG headers not available (set NNG_INCLUDE_DIR, install libnng-dev, or build first)",
 )
 
 
