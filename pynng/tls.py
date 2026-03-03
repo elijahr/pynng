@@ -55,7 +55,7 @@ class TLSConfig:
             raise ValueError("Cannot set both ca_string and ca_files!")
 
         if (own_cert_string or own_key_string) and cert_key_file:
-            raise ValueError("Cannot set both own_{key,cert}_string an cert_key_file!")
+            raise ValueError("Cannot set both own_{key,cert}_string and cert_key_file!")
 
         if bool(own_cert_string) != bool(own_key_string):
             raise ValueError(

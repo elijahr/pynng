@@ -181,8 +181,7 @@ def test_socket_del_after_bad_init():
     with contextlib.redirect_stderr(stderr_capture):
         gc.collect()
     stderr_output = stderr_capture.getvalue()
-    assert "Error" not in stderr_output and "Exception" not in stderr_output and "Traceback" not in stderr_output, \
-        f"__del__ raised during gc: {stderr_output}"
+    assert stderr_output == "", f"__del__ raised during gc: {stderr_output!r}"
 
 
 def test_context_del_after_socket_close():
@@ -196,8 +195,7 @@ def test_context_del_after_socket_close():
     with contextlib.redirect_stderr(stderr_capture):
         gc.collect()
     stderr_output = stderr_capture.getvalue()
-    assert "Error" not in stderr_output and "Exception" not in stderr_output and "Traceback" not in stderr_output, \
-        f"__del__ raised during gc: {stderr_output}"
+    assert stderr_output == "", f"__del__ raised during gc: {stderr_output!r}"
 
 
 def test_tls_config_del_after_init_failure():
@@ -213,8 +211,7 @@ def test_tls_config_del_after_init_failure():
     with contextlib.redirect_stderr(stderr_capture):
         gc.collect()
     stderr_output = stderr_capture.getvalue()
-    assert "Error" not in stderr_output and "Exception" not in stderr_output and "Traceback" not in stderr_output, \
-        f"__del__ raised during gc: {stderr_output}"
+    assert stderr_output == "", f"__del__ raised during gc: {stderr_output!r}"
 
 
 @pytest.mark.skipif(

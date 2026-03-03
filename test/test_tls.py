@@ -124,26 +124,30 @@ def test_config_file(tmp_path):
 def test_tls_config_ca_mutual_exclusion():
     """Cannot set both ca_string and ca_files."""
     # ValueError is raised before NNG allocation, so no TLSConfig is created.
-    with pytest.raises(ValueError, match="Cannot set both ca_string and ca_files"):
+    with pytest.raises(ValueError) as exc_info:
         TLSConfig(TLSConfig.MODE_CLIENT, ca_string="cert", ca_files=["file.pem"])
+    assert str(exc_info.value) == "Cannot set both ca_string and ca_files!"
     gc.collect()
 
 
 def test_tls_config_own_cert_mutual_exclusion():
     """Cannot set both own_cert_string/own_key_string and cert_key_file."""
-    with pytest.raises(ValueError, match="Cannot set both"):
+    with pytest.raises(ValueError) as exc_info:
         TLSConfig(TLSConfig.MODE_SERVER,
                   own_cert_string="cert", own_key_string="key",
                   cert_key_file="file.pem")
+    assert str(exc_info.value) == "Cannot set both own_{key,cert}_string and cert_key_file!"
     gc.collect()
 
 
 def test_tls_config_own_cert_both_required():
     """own_cert_string and own_key_string must both be set or both unset."""
-    with pytest.raises(ValueError, match="must be both set"):
+    with pytest.raises(ValueError) as exc_info:
         TLSConfig(TLSConfig.MODE_SERVER, own_cert_string="cert")
-    with pytest.raises(ValueError, match="must be both set"):
+    assert str(exc_info.value) == "own_key_string and own_cert_string must be both set or unset"
+    with pytest.raises(ValueError) as exc_info:
         TLSConfig(TLSConfig.MODE_SERVER, own_key_string="key")
+    assert str(exc_info.value) == "own_key_string and own_cert_string must be both set or unset"
     gc.collect()
 
 

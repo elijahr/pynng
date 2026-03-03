@@ -141,8 +141,7 @@ def test_message_del_without_send():
     with contextlib.redirect_stderr(stderr_capture):
         gc.collect()
     stderr_output = stderr_capture.getvalue()
-    assert "Error" not in stderr_output and "Exception" not in stderr_output and "Traceback" not in stderr_output, \
-        f"__del__ raised during gc: {stderr_output}"
+    assert stderr_output == "", f"__del__ raised during gc: {stderr_output!r}"
 
 
 def test_message_del_after_send():
@@ -158,8 +157,7 @@ def test_message_del_after_send():
         with contextlib.redirect_stderr(stderr_capture):
             gc.collect()
         stderr_output = stderr_capture.getvalue()
-        assert "Error" not in stderr_output and "Exception" not in stderr_output and "Traceback" not in stderr_output, \
-            f"__del__ raised during gc: {stderr_output}"
+        assert stderr_output == "", f"__del__ raised during gc: {stderr_output!r}"
 
 
 def test_message_pipe_setter_rejects_non_pipe():

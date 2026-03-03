@@ -73,13 +73,10 @@ async def test_pubsub_fanout_all_subscribers_receive_trio():
 
     # Verify all subscribers received all messages
     for idx in range(num_subs):
-        assert len(received[idx]) == num_messages, (
-            "Subscriber {} received {} messages, expected {}".format(
-                idx, len(received[idx]), num_messages
-            )
+        expected = sorted("msg:{}".format(i).encode() for i in range(num_messages))
+        assert sorted(received[idx]) == expected, (
+            "Subscriber {} received wrong messages: {}".format(idx, received[idx])
         )
-        for i in range(num_messages):
-            assert "msg:{}".format(i).encode() in received[idx]
 
 
 @pytest.mark.asyncio
@@ -117,9 +114,10 @@ async def test_pubsub_fanout_all_subscribers_receive_asyncio():
             sub.close()
 
     for idx in range(num_subs):
-        assert len(received[idx]) == num_messages
-        for i in range(num_messages):
-            assert "msg:{}".format(i).encode() in received[idx]
+        expected = sorted("msg:{}".format(i).encode() for i in range(num_messages))
+        assert sorted(received[idx]) == expected, (
+            "Subscriber {} received wrong messages: {}".format(idx, received[idx])
+        )
 
 
 @pytest.mark.trio
@@ -163,12 +161,10 @@ async def test_pubsub_topic_filtering_trio():
         sub_even.close()
         sub_odd.close()
 
-    assert len(received_even) == num_per_topic
-    assert len(received_odd) == num_per_topic
-    for msg in received_even:
-        assert msg.startswith(b"even:")
-    for msg in received_odd:
-        assert msg.startswith(b"odd:")
+    expected_even = sorted(b"even:" + str(i).encode() for i in range(0, num_per_topic * 2, 2))
+    expected_odd = sorted(b"odd:" + str(i).encode() for i in range(1, num_per_topic * 2, 2))
+    assert sorted(received_even) == expected_even, "Even messages wrong: {}".format(received_even)
+    assert sorted(received_odd) == expected_odd, "Odd messages wrong: {}".format(received_odd)
 
 
 @pytest.mark.asyncio
@@ -208,12 +204,10 @@ async def test_pubsub_topic_filtering_asyncio():
         sub_even.close()
         sub_odd.close()
 
-    assert len(received_even) == num_per_topic
-    assert len(received_odd) == num_per_topic
-    for msg in received_even:
-        assert msg.startswith(b"even:")
-    for msg in received_odd:
-        assert msg.startswith(b"odd:")
+    expected_even = sorted(b"even:" + str(i).encode() for i in range(0, num_per_topic * 2, 2))
+    expected_odd = sorted(b"odd:" + str(i).encode() for i in range(1, num_per_topic * 2, 2))
+    assert sorted(received_even) == expected_even, "Even messages wrong: {}".format(received_even)
+    assert sorted(received_odd) == expected_odd, "Odd messages wrong: {}".format(received_odd)
 
 
 # ---------------------------------------------------------------------------
@@ -604,9 +598,9 @@ async def test_survey_with_partial_responses_trio():
             r.close()
 
     # Should have exactly 2 responses (from respondents 0 and 1)
-    assert len(responses_collected) == 2
-    assert b"response-0" in responses_collected
-    assert b"response-1" in responses_collected
+    assert sorted(responses_collected) == [b"response-0", b"response-1"], (
+        "Unexpected survey responses: {}".format(responses_collected)
+    )
 
 
 @pytest.mark.asyncio
@@ -653,9 +647,9 @@ async def test_survey_with_partial_responses_asyncio():
         for r in respondents:
             r.close()
 
-    assert len(responses_collected) == 2
-    assert b"response-0" in responses_collected
-    assert b"response-1" in responses_collected
+    assert sorted(responses_collected) == [b"response-0", b"response-1"], (
+        "Unexpected survey responses: {}".format(responses_collected)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -704,11 +698,12 @@ async def test_async_for_multiple_sockets_parallel_trio():
     pusher1.close()
     pusher2.close()
 
-    assert len(received1) == num_messages
-    assert len(received2) == num_messages
-    for i in range(num_messages):
-        assert "s1-{}".format(i).encode() in received1
-        assert "s2-{}".format(i).encode() in received2
+    assert received1 == ["s1-{}".format(i).encode() for i in range(num_messages)], (
+        "Socket 1 received wrong messages: {}".format(received1)
+    )
+    assert received2 == ["s2-{}".format(i).encode() for i in range(num_messages)], (
+        "Socket 2 received wrong messages: {}".format(received2)
+    )
 
 
 @pytest.mark.asyncio
@@ -750,11 +745,12 @@ async def test_async_for_multiple_sockets_parallel_asyncio():
     pusher1.close()
     pusher2.close()
 
-    assert len(received1) == num_messages
-    assert len(received2) == num_messages
-    for i in range(num_messages):
-        assert "s1-{}".format(i).encode() in received1
-        assert "s2-{}".format(i).encode() in received2
+    assert received1 == ["s1-{}".format(i).encode() for i in range(num_messages)], (
+        "Socket 1 received wrong messages: {}".format(received1)
+    )
+    assert received2 == ["s2-{}".format(i).encode() for i in range(num_messages)], (
+        "Socket 2 received wrong messages: {}".format(received2)
+    )
 
 
 @pytest.mark.trio
