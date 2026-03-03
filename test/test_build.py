@@ -91,7 +91,8 @@ class TestFFICoreFunctions:
         ],
     )
     def test_ffi_has_protocol_openers(self, func_name):
-        assert hasattr(lib, func_name)
+        assert hasattr(lib, func_name), f"lib missing {func_name}"
+        assert callable(getattr(lib, func_name)), f"lib.{func_name} is not callable"
 
     @pytest.mark.parametrize(
         "func_name",
@@ -109,7 +110,8 @@ class TestFFICoreFunctions:
         ],
     )
     def test_ffi_has_core_functions(self, func_name):
-        assert hasattr(lib, func_name)
+        assert hasattr(lib, func_name), f"lib missing {func_name}"
+        assert callable(getattr(lib, func_name)), f"lib.{func_name} is not callable"
 
 
 class TestFFIExcludePatterns:
@@ -148,20 +150,21 @@ class TestFFIDefines:
         ],
     )
     def test_ffi_has_flag_defines(self, define_name):
-        assert hasattr(lib, define_name)
+        assert hasattr(lib, define_name), f"lib missing {define_name}"
+        assert getattr(lib, define_name) != 0, f"{define_name} must be non-zero"
 
     def test_flag_alloc_is_integer(self):
-        assert isinstance(lib.NNG_FLAG_ALLOC, int)
+        assert lib.NNG_FLAG_ALLOC == 1
 
     def test_flag_nonblock_is_integer(self):
-        assert isinstance(lib.NNG_FLAG_NONBLOCK, int)
+        assert lib.NNG_FLAG_NONBLOCK == 2
 
     @pytest.mark.skipif(
         not hasattr(lib, "NNG_MAXADDRLEN"),
         reason="NNG_MAXADDRLEN only available with headerkit build system",
     )
     def test_maxaddrlen_is_positive(self):
-        assert lib.NNG_MAXADDRLEN > 0
+        assert lib.NNG_MAXADDRLEN == 128
 
 
 # -- Tests against build_pynng functions directly ----------------------------
@@ -201,9 +204,10 @@ class TestExtractDefines:
         _extract_defines = self._get_extract_defines()
         nng_h = os.path.join(_NNG_INCLUDE_DIR, "nng", "nng.h")
         result = _extract_defines(nng_h)
-        assert "NNG_FLAG_ALLOC" in result
-        assert "NNG_FLAG_NONBLOCK" in result
-        assert "NNG_MAXADDRLEN" in result
+        lines = result.strip().split("\n")
+        assert "#define NNG_FLAG_ALLOC ..." in lines, "NNG_FLAG_ALLOC not in defines"
+        assert "#define NNG_FLAG_NONBLOCK ..." in lines, "NNG_FLAG_NONBLOCK not in defines"
+        assert "#define NNG_MAXADDRLEN ..." in lines, "NNG_MAXADDRLEN not in defines"
 
     def test_extract_defines_format(self):
         _extract_defines = self._get_extract_defines()
@@ -263,7 +267,9 @@ class TestGenerateCdef:
             "nng_dialer",
             "nng_listener",
         ]:
-            assert type_name in cdef, f"Missing type {type_name} in cdef"
+            assert re.search(r'\b' + re.escape(type_name) + r'\b', cdef) is not None, (
+                f"Missing type {type_name} in cdef"
+            )
 
     def test_cdef_contains_protocol_openers(self):
         from build_pynng import generate_cdef
@@ -281,7 +287,9 @@ class TestGenerateCdef:
             "nng_surveyor0_open",
             "nng_respondent0_open",
         ]:
-            assert func in cdef, f"Missing function {func} in cdef"
+            assert re.search(r'\b' + re.escape(func) + r'\b', cdef) is not None, (
+                f"Missing function {func} in cdef"
+            )
 
     def test_cdef_excludes_filtered_patterns(self):
         from build_pynng import generate_cdef
@@ -290,14 +298,18 @@ class TestGenerateCdef:
         assert "nng_tls_config_pass" not in cdef
         assert "nng_tls_config_key" not in cdef
         # But other TLS functions should be present
-        assert "nng_tls_config_alloc" in cdef
+        assert re.search(r'\bnng_tls_config_alloc\b', cdef) is not None, (
+            "nng_tls_config_alloc missing from cdef"
+        )
 
     def test_cdef_contains_core_functions(self):
         from build_pynng import generate_cdef
 
         cdef, _ = generate_cdef()
         for func in ["nng_send", "nng_recv", "nng_close", "nng_aio_alloc", "nng_ctx_open"]:
-            assert func in cdef, f"Missing function {func} in cdef"
+            assert re.search(r'\b' + re.escape(func) + r'\b', cdef) is not None, (
+                f"Missing function {func} in cdef"
+            )
 
 
 @_skip_no_headers
@@ -330,7 +342,9 @@ class TestUmbrellaHeader:
         cdef, _ = generate_cdef()
 
         # Core nng.h types
-        assert "nng_socket" in cdef, "Missing nng_socket from nng/nng.h"
+        assert re.search(r'\bnng_socket\b', cdef) is not None, (
+            "Missing nng_socket from nng/nng.h"
+        )
 
         # Protocol-specific openers prove that protocol headers were included
         protocol_markers = {
@@ -348,12 +362,12 @@ class TestUmbrellaHeader:
         }
         for header, marker in protocol_markers.items():
             if header in existing:
-                assert marker in cdef, (
+                assert re.search(r'\b' + re.escape(marker) + r'\b', cdef) is not None, (
                     f"Header {header} exists but {marker} missing from cdef"
                 )
 
         # TLS header inclusion (if present)
         if "nng/supplemental/tls/tls.h" in existing:
-            assert "nng_tls_config_alloc" in cdef, (
+            assert re.search(r'\bnng_tls_config_alloc\b', cdef) is not None, (
                 "TLS header exists but nng_tls_config_alloc missing from cdef"
             )

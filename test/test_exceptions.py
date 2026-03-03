@@ -82,8 +82,7 @@ class TestExceptionAttributes:
             exceptions.check_err(lib.NNG_ETIMEDOUT)
         except exceptions.Timeout as e:
             msg = str(e)
-            assert isinstance(msg, str)
-            assert len(msg) > 0
+            assert msg == "Timed out"
         else:
             pytest.fail("Expected Timeout")
 
@@ -129,23 +128,24 @@ class TestExceptionMapCompleteness:
     """Verify that EXCEPTION_MAP covers all commonly-encountered NNG errors."""
 
     def test_exception_map_covers_common_errors(self):
-        expected_codes = [
-            lib.NNG_EINTR,
-            lib.NNG_ENOMEM,
-            lib.NNG_EINVAL,
-            lib.NNG_EBUSY,
-            lib.NNG_ETIMEDOUT,
-            lib.NNG_ECONNREFUSED,
-            lib.NNG_ECLOSED,
-            lib.NNG_EAGAIN,
-            lib.NNG_ENOTSUP,
-            lib.NNG_EADDRINUSE,
-            lib.NNG_ESTATE,
-            lib.NNG_ECANCELED,
+        expected_mappings = [
+            (lib.NNG_EINTR, exceptions.Interrupted),
+            (lib.NNG_ENOMEM, exceptions.NoMemory),
+            (lib.NNG_EINVAL, exceptions.InvalidOperation),
+            (lib.NNG_EBUSY, exceptions.Busy),
+            (lib.NNG_ETIMEDOUT, exceptions.Timeout),
+            (lib.NNG_ECONNREFUSED, exceptions.ConnectionRefused),
+            (lib.NNG_ECLOSED, exceptions.Closed),
+            (lib.NNG_EAGAIN, exceptions.TryAgain),
+            (lib.NNG_ENOTSUP, exceptions.NotSupported),
+            (lib.NNG_EADDRINUSE, exceptions.AddressInUse),
+            (lib.NNG_ESTATE, exceptions.BadState),
+            (lib.NNG_ECANCELED, exceptions.Canceled),
         ]
-        for code in expected_codes:
-            assert code in exceptions.EXCEPTION_MAP, (
-                f"Error code {code} not in EXCEPTION_MAP"
+        for code, expected_class in expected_mappings:
+            assert exceptions.EXCEPTION_MAP.get(code) is expected_class, (
+                f"Error code {code} maps to {exceptions.EXCEPTION_MAP.get(code)}, "
+                f"expected {expected_class.__name__}"
             )
 
     def test_exception_map_has_unique_classes(self):

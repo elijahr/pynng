@@ -153,6 +153,9 @@ async def test_socket_async_with_trio():
             assert await s.arecv() == b"hi"
     # After exiting, socket should be closed (listeners cleared)
     assert len(s._listeners) == 0
+    # Verify NNG-level closure: any operation on a closed socket raises Closed
+    with pytest.raises(pynng.Closed):
+        s.recv()
 
 
 @pytest.mark.asyncio
@@ -166,6 +169,9 @@ async def test_socket_async_with_asyncio():
             assert await s.arecv() == b"hi"
     # After exiting, socket should be closed (listeners cleared)
     assert len(s._listeners) == 0
+    # Verify NNG-level closure: any operation on a closed socket raises Closed
+    with pytest.raises(pynng.Closed):
+        s.recv()
 
 
 @pytest.mark.trio
@@ -200,6 +206,9 @@ async def test_socket_aclose_trio():
     assert len(s.listeners) == 1
     await s.aclose()
     assert len(s._listeners) == 0
+    # Verify NNG-level closure: any operation on a closed socket raises Closed
+    with pytest.raises(pynng.Closed):
+        s.recv()
 
 
 @pytest.mark.asyncio
@@ -210,6 +219,9 @@ async def test_socket_aclose_asyncio():
     assert len(s.listeners) == 1
     await s.aclose()
     assert len(s._listeners) == 0
+    # Verify NNG-level closure: any operation on a closed socket raises Closed
+    with pytest.raises(pynng.Closed):
+        s.recv()
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +363,7 @@ async def test_context_async_with_trio():
                 assert await ctx_req.arecv() == b"world"
             # ctx_rep should be closed now
             assert ctx_rep._context is None
+            ctx_rep.close()  # Second close must not raise
 
 
 @pytest.mark.asyncio
@@ -368,6 +381,7 @@ async def test_context_async_with_asyncio():
                 assert await ctx_req.arecv() == b"world"
             # ctx_rep should be closed now
             assert ctx_rep._context is None
+            ctx_rep.close()  # Second close must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +396,7 @@ async def test_context_aclose_trio():
         assert ctx._context is not None
         await ctx.aclose()
         assert ctx._context is None
+        ctx.close()  # Second close must not raise
 
 
 @pytest.mark.asyncio
@@ -392,6 +407,7 @@ async def test_context_aclose_asyncio():
         assert ctx._context is not None
         await ctx.aclose()
         assert ctx._context is None
+        ctx.close()  # Second close must not raise
 
 
 # ---------------------------------------------------------------------------

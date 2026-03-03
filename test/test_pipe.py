@@ -224,7 +224,6 @@ def test_pipe_dialer_property():
         wait_pipe_len(s1, 1)
         pipe = s1.pipes[0]
         dialer = pipe.dialer
-        assert dialer is not None
         assert dialer is s1.dialers[0]
 
 
@@ -234,7 +233,6 @@ def test_pipe_listener_property():
         wait_pipe_len(s0, 1)
         pipe = s0.pipes[0]
         listener = pipe.listener
-        assert listener is not None
         assert listener is s0.listeners[0]
 
 

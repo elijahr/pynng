@@ -164,8 +164,9 @@ def test_surveyor_respondent():
         """
         resp2.send(msg2)
         resp = [surveyor.recv() for _ in range(2)]
-        assert b"not too bad I suppose" in resp
-        assert msg2 in resp
+        assert set(resp) == {b"not too bad I suppose", msg2}, (
+            "Unexpected survey responses: {}".format(resp)
+        )
 
         with pytest.raises(pynng.BadState):
             resp2.send(b"oadsfji")
@@ -189,8 +190,7 @@ def test_cannot_instantiate_socket_without_opener():
 def test_can_instantiate_socket_with_raw_opener():
     with pynng.Socket(opener=pynng.lib.nng_sub0_open_raw) as s:
         assert s.raw is True
-        assert isinstance(s.protocol_name, str)
-        assert len(s.protocol_name) > 0
+        assert s.protocol_name == "sub"
 
 
 def test_can_pass_addr_as_bytes_or_str():
