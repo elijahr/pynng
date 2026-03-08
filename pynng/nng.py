@@ -21,6 +21,7 @@ from . import _aio
 # from dereferencing a dangling pointer when NNG fires a pipe callback after
 # a Socket has been garbage-collected. Keyed by nng_socket id.
 _active_handles = {}
+_active_handles_lock = threading.Lock()
 
 
 PipeEvent = collections.namedtuple("PipeEvent", ["pipe", "event_type"])
@@ -468,6 +469,8 @@ class Socket:
         self._on_post_pipe_add = []
         self._on_post_pipe_remove = []
         self._pipe_notify_lock = threading.Lock()
+        self._socket_closed = False
+        self._close_lock = threading.Lock()
         self._async_backend = async_backend
         self._socket = ffi.new(
             "nng_socket *",
@@ -504,7 +507,8 @@ class Socket:
         # Keep the handle alive in a module-level dict so that if this Socket
         # is GC'd, NNG pipe callbacks won't dereference a dangling pointer.
         # The handle is removed in close() after nng_close() completes.
-        _active_handles[lib.nng_socket_id(self.socket)] = handle
+        with _active_handles_lock:
+            _active_handles[lib.nng_socket_id(self.socket)] = handle
 
         for event in (
             lib.NNG_PIPE_EV_ADD_PRE,
@@ -580,26 +584,40 @@ class Socket:
         return py_listener
 
     def close(self):
-        """Close the socket, freeing all system resources."""
+        """Close the socket, freeing all system resources.
+
+        This method is idempotent and thread-safe. It may be called multiple
+        times (e.g. via __exit__ and later __del__) without harm.
+        """
         # if a TypeError occurs (e.g. a bad keyword to __init__) we don't have
         # the attribute _socket yet.  This prevents spewing extra exceptions
-        if hasattr(self, "_socket"):
-            sock_id = lib.nng_socket_id(self.socket)
-            # Note: we do not explicitly cancel pending AIO operations here.
-            # nng_close() completes them with NNG_ECLOSED, and AIOHelper
-            # already handles that error correctly. Tracking which AIOHelpers
-            # are associated with this socket would add complexity without
-            # benefit, since the AIOHelper context manager calls _free()
-            # which handles cleanup.
-            lib.nng_close(self.socket)
-            # Remove the handle from the module-level registry AFTER
-            # nng_close() completes, so no more pipe callbacks can fire.
-            _active_handles.pop(sock_id, None)
-            # cleanup the list of listeners/dialers.  A program would be likely to
-            # segfault if a user accessed the listeners or dialers after this
-            # point.
-            self._listeners = {}
-            self._dialers = {}
+        if not hasattr(self, "_socket"):
+            return
+        with self._close_lock:
+            if self._socket_closed:
+                return
+            self._socket_closed = True
+        sock_id = lib.nng_socket_id(self.socket)
+        # Note: we do not explicitly cancel pending AIO operations here.
+        # nng_close() completes them with NNG_ECLOSED, and AIOHelper
+        # already handles that error correctly. Tracking which AIOHelpers
+        # are associated with this socket would add complexity without
+        # benefit, since the AIOHelper context manager calls _free()
+        # which handles cleanup.
+        lib.nng_close(self.socket)
+        # Remove the handle from the module-level registry AFTER
+        # nng_close() completes, so no more pipe callbacks can fire.
+        # Verify the handle belongs to this socket before removing,
+        # in case a new socket reused the same ID between our check
+        # and the pop.
+        with _active_handles_lock:
+            if _active_handles.get(sock_id) is self._handle:
+                del _active_handles[sock_id]
+        # cleanup the list of listeners/dialers.  A program would be likely to
+        # segfault if a user accessed the listeners or dialers after this
+        # point.
+        self._listeners = {}
+        self._dialers = {}
 
     def __del__(self):
         try:
