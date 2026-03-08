@@ -112,7 +112,6 @@ def test_abstract_socket_with_special_chars():
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Abstract sockets are Linux-specific"
 )
-@pytest.mark.xfail(strict=True, reason="NNG abstract socket auto-bind may not be supported")
 def test_abstract_socket_auto_bind():
     """Test that abstract sockets can auto-bind (assign a random name).
 

@@ -1,4 +1,5 @@
 import gc
+import platform
 
 import pytest
 
@@ -166,6 +167,10 @@ def test_tls_set_server_name_none():
         gc.collect()
 
 
+@pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason="Windows SChannel TLS backend does not support set_auth_mode",
+)
 def test_tls_auth_mode():
     """Test TLSConfig.set_auth_mode with valid and invalid values."""
     config = TLSConfig(
@@ -207,6 +212,10 @@ def test_tls_auth_mode():
         gc.collect()
 
 
+@pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason="Windows SChannel TLS backend does not support set_auth_mode",
+)
 def test_tls_auth_mode_in_constructor():
     """Verify auth_mode parameter in constructor works for all valid values.
 
