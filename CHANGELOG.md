@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `recv_timeout` and `send_timeout` option descriptors on `Context` for per-context timeout control
 
 ### Changed
-- Switch cibuildwheel to uv build frontend to avoid GitHub rate limiting on virtualenv downloads
+- Switch cibuildwheel to uv build frontend, eliminating virtualenv.pyz downloads
 - Migrate build system from setuptools/CMake to scikit-build-core with headerkit for C header generation
 - Replace handwritten CFFI bindings with auto-generated bindings from NNG headers via headerkit
 - Add CI concurrency groups to cancel stale workflow runs
