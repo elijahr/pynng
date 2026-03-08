@@ -68,10 +68,10 @@ async def test_asend_trio_send_timeout():
 async def test_pub_sub_trio():
     """Demonstrate pub-sub protocol use with ``trio``.
 
-    Start a publisher which publishes 1000 integers and marks each value
-    as *even* or *odd* (its parity). Spawn 4 subscribers (2 for consuming
-    the evens and 2 for consuming the odds) in separate tasks and have each
-    one retreive values and verify the parity.
+    Start a publisher which publishes 20 integers and marks each value
+    as *even* or *odd* (its parity). Spawn 2 subscribers (1 for consuming
+    the evens and 1 for consuming the odds) in separate tasks and have each
+    one retrieve values and verify the parity.
     """
     sentinel_received = {}
 
@@ -80,6 +80,12 @@ async def test_pub_sub_trio():
 
     async def pub():
         with pynng.Pub0(listen=addr) as pubber:
+            # Wait until both subscribers have connected before publishing.
+            # inproc is reliable but messages sent before subscription is
+            # established are dropped.
+            while len(pubber.pipes) < 2:
+                await trio.sleep(0.01)
+
             for i in range(20):
                 prefix = "even" if is_even(i) else "odd"
                 msg = "{}:{}".format(prefix, i)
@@ -92,14 +98,14 @@ async def test_pub_sub_trio():
 
     async def subs(which):
         if which == "even":
-            pred = is_even
+            expected_values = list(range(0, 20, 2))  # [0, 2, 4, ..., 18]
         else:
-            pred = lambda i: not is_even(i)
+            expected_values = list(range(1, 20, 2))  # [1, 3, 5, ..., 19]
 
         with pynng.Sub0(dial=addr, recv_timeout=5000) as subber:
             subber.subscribe(which + ":")
 
-            data_count = 0
+            received_values = []
             while True:
                 val = await subber.arecv()
 
@@ -108,10 +114,15 @@ async def test_pub_sub_trio():
                 if i == b"None":
                     break
 
-                assert pred(int(i))
-                data_count += 1
+                received_values.append(int(i))
 
-            assert data_count > 0, f"{which} subscriber received no data messages"
+            # The publisher sends 20 messages (10 per parity). Since pub
+            # waits for both subscribers to connect before publishing,
+            # all 10 messages must arrive with exactly the right values.
+            assert sorted(received_values) == expected_values, (
+                f"{which} subscriber received wrong values: {sorted(received_values)!r}, "
+                f"expected {expected_values!r}"
+            )
             # mark subscriber as having received None sentinel
             sentinel_received[which] = True
 
