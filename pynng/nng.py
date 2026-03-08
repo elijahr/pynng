@@ -516,6 +516,8 @@ class Socket:
         return self
 
     async def __aexit__(self, *tb_info):
+        """Close the socket. Delegates to synchronous close() since the
+        underlying NNG close operation is non-blocking."""
         self.close()
 
     def __aiter__(self):
@@ -1369,6 +1371,8 @@ class Context:
         return self
 
     async def __aexit__(self, *exc_info):
+        """Close the context. Delegates to synchronous close() since the
+        underlying NNG close operation is non-blocking."""
         self.close()
 
     def __aiter__(self):
