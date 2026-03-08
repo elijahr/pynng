@@ -39,6 +39,16 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: Cache cibuildwheel downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/cibuildwheel
+            ~/AppData/Local/pypa/cibuildwheel/Cache
+          key: cibw-cache-${{ matrix.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            cibw-cache-${{ matrix.os }}-
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.23.3
 
