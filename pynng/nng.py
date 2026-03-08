@@ -17,6 +17,11 @@ from .exceptions import check_err
 from . import options
 from . import _aio
 
+# Module-level registry of active socket handles. Prevents ffi.from_handle()
+# from dereferencing a dangling pointer when NNG fires a pipe callback after
+# a Socket has been garbage-collected. Keyed by nng_socket id.
+_active_handles = {}
+
 
 PipeEvent = collections.namedtuple("PipeEvent", ["pipe", "event_type"])
 """A pipe event with the pipe and the event type.
@@ -72,7 +77,12 @@ class PipeEventStream:
         if self._closed:
             return
         if self._backend == "asyncio":
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
+            try:
+                self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
+            except RuntimeError:
+                # Event loop is already closed; the stream is being torn down
+                # anyway, so silently drop the event.
+                pass
         elif self._backend == "trio":
             import trio
             try:
@@ -491,6 +501,10 @@ class Socket:
 
         handle = ffi.new_handle(self)
         self._handle = handle
+        # Keep the handle alive in a module-level dict so that if this Socket
+        # is GC'd, NNG pipe callbacks won't dereference a dangling pointer.
+        # The handle is removed in close() after nng_close() completes.
+        _active_handles[lib.nng_socket_id(self.socket)] = handle
 
         for event in (
             lib.NNG_PIPE_EV_ADD_PRE,
@@ -570,7 +584,17 @@ class Socket:
         # if a TypeError occurs (e.g. a bad keyword to __init__) we don't have
         # the attribute _socket yet.  This prevents spewing extra exceptions
         if hasattr(self, "_socket"):
+            sock_id = lib.nng_socket_id(self.socket)
+            # Note: we do not explicitly cancel pending AIO operations here.
+            # nng_close() completes them with NNG_ECLOSED, and AIOHelper
+            # already handles that error correctly. Tracking which AIOHelpers
+            # are associated with this socket would add complexity without
+            # benefit, since the AIOHelper context manager calls _free()
+            # which handles cleanup.
             lib.nng_close(self.socket)
+            # Remove the handle from the module-level registry AFTER
+            # nng_close() completes, so no more pipe callbacks can fire.
+            _active_handles.pop(sock_id, None)
             # cleanup the list of listeners/dialers.  A program would be likely to
             # segfault if a user accessed the listeners or dialers after this
             # point.
@@ -720,7 +744,8 @@ class Socket:
         post_pipe_connect and post_pipe_remove will not be called.
 
         """
-        self._on_pre_pipe_add.append(callback)
+        with self._pipe_notify_lock:
+            self._on_pre_pipe_add.append(callback)
 
     def add_post_pipe_connect_cb(self, callback):
         """
@@ -731,7 +756,8 @@ class Socket:
         The callback provided must accept a single argument: a :class:`Pipe`.
 
         """
-        self._on_post_pipe_add.append(callback)
+        with self._pipe_notify_lock:
+            self._on_post_pipe_add.append(callback)
 
     def add_post_pipe_remove_cb(self, callback):
         """
@@ -742,28 +768,32 @@ class Socket:
         The callback provided must accept a single argument: a :class:`Pipe`.
 
         """
-        self._on_post_pipe_remove.append(callback)
+        with self._pipe_notify_lock:
+            self._on_post_pipe_remove.append(callback)
 
     def remove_pre_pipe_connect_cb(self, callback):
         """Remove ``callback`` from the list of callbacks for pre pipe connect
         events
 
         """
-        self._on_pre_pipe_add.remove(callback)
+        with self._pipe_notify_lock:
+            self._on_pre_pipe_add.remove(callback)
 
     def remove_post_pipe_connect_cb(self, callback):
         """Remove ``callback`` from the list of callbacks for post pipe connect
         events
 
         """
-        self._on_post_pipe_add.remove(callback)
+        with self._pipe_notify_lock:
+            self._on_post_pipe_add.remove(callback)
 
     def remove_post_pipe_remove_cb(self, callback):
         """Remove ``callback`` from the list of callbacks for post pipe remove
         events
 
         """
-        self._on_post_pipe_remove.remove(callback)
+        with self._pipe_notify_lock:
+            self._on_post_pipe_remove.remove(callback)
 
     def pipe_events(self):
         """Return an async iterator of :class:`PipeEvent` objects.
@@ -1606,8 +1636,16 @@ def _do_callbacks(pipe, callbacks):
 def _nng_pipe_cb(lib_pipe, event, arg):
     logger.debug("Pipe callback event {}".format(event))
 
-    # Get the Socket from the handle passed through the callback arguments
-    sock = ffi.from_handle(arg)
+    # Get the Socket from the handle passed through the callback arguments.
+    # If the Socket has been GC'd and the handle is invalid, from_handle()
+    # will crash. Guard against this by catching exceptions.
+    try:
+        sock = ffi.from_handle(arg)
+    except Exception:
+        logger.warning(
+            "Pipe callback fired with invalid handle (socket likely GC'd); ignoring"
+        )
+        return
 
     # exceptions don't propagate out of this function, so if any exception is
     # raised in any of the callbacks, we just log it (using logger.exception).
