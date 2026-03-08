@@ -13,7 +13,7 @@ get set up for development and walk you through the contribution workflow.
 - libclang (for building from source -- headerkit uses it to parse NNG's C headers)
   - Ubuntu/Debian: `sudo apt install ninja-build libclang-dev`
   - macOS: Xcode command line tools (usually sufficient)
-  - RHEL/CentOS/Fedora: `sudo yum install clang-devel`
+  - RHEL/CentOS/Fedora: `sudo dnf install clang-devel` (or `yum` on older systems)
   - Alpine: `apk add clang-dev`
   - Windows: LLVM (installed automatically during CI builds)
 
