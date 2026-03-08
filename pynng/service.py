@@ -29,11 +29,10 @@ class Request:
 
     """
 
-    def __init__(self, data, context, _replied_event=None):
+    def __init__(self, data, context):
         self.data = data
         self.context = context
         self._replied = False
-        self._replied_event = _replied_event
 
     async def reply(self, data):
         """Send a response back to the requester.
@@ -48,8 +47,6 @@ class Request:
             raise RuntimeError("This request has already been replied to")
         self._replied = True
         await self.context.asend(data)
-        if self._replied_event is not None:
-            self._replied_event.set()
 
     def __del__(self):
         if not self._replied:
@@ -139,13 +136,13 @@ class Rep0Service:
         while self._running:
             try:
                 data = await ctx.arecv()
-                replied_event = asyncio.Event()
-                request = Request(data, ctx, _replied_event=replied_event)
+                request = Request(data, ctx)
                 await self._queue.put(request)
                 # Wait for the reply to be sent before receiving the next
                 # request on this context (REP protocol requires recv-send
                 # alternation per context).
-                await replied_event.wait()
+                while not request._replied and self._running:
+                    await asyncio.sleep(0.001)
             except Closed:
                 break
             except Exception:
@@ -176,11 +173,11 @@ class Rep0Service:
         while self._running:
             try:
                 data = await ctx.arecv()
-                replied_event = trio.Event()
-                request = Request(data, ctx, _replied_event=replied_event)
+                request = Request(data, ctx)
                 await self._trio_send_channel.send(request)
                 # Wait for the reply before receiving again on this context
-                await replied_event.wait()
+                while not request._replied and self._running:
+                    await trio.sleep(0.001)
             except Closed:
                 break
             except Exception:
@@ -207,7 +204,7 @@ class Rep0Service:
             try:
                 ctx.close()
             except Exception:
-                logger.debug("Exception closing context during shutdown", exc_info=True)
+                pass
 
         # Cancel worker tasks
         for task in self._worker_tasks:
@@ -217,10 +214,8 @@ class Rep0Service:
         for task in self._worker_tasks:
             try:
                 await task
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, Exception):
                 pass
-            except Exception:
-                logger.debug("Exception in worker during shutdown", exc_info=True)
 
         # Drain the queue
         await self._queue.put(self._sentinel)
@@ -239,7 +234,7 @@ class Rep0Service:
             try:
                 ctx.close()
             except Exception:
-                logger.debug("Exception closing context during shutdown", exc_info=True)
+                pass
 
         # Close the send channel so workers know to stop
         await self._trio_send_channel.aclose()
