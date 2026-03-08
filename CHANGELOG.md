@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `Rep0Service` high-level async service class for concurrent request/reply handling with multiple context workers
+- `Request` class with `.data` and `.reply()` for ergonomic request processing within `Rep0Service`
 - `async with` context manager support for sockets (`async with pynng.Pair0() as sock:`)
 - `async for` iteration over received messages (`async for msg in sock:`)
 - `aclose()` method for explicit async socket cleanup
