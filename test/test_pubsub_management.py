@@ -73,12 +73,11 @@ def test_unsubscribe_removes_from_tracking():
 
 
 def test_unsubscribe_nonexistent_topic():
-    """Unsubscribing from a topic not subscribed to does not raise."""
+    """Unsubscribing from a topic not subscribed to raises NNGException."""
     with pynng.Sub0() as sub:
-        # NNG may raise an error for unsubscribing from a non-subscribed topic,
-        # but our tracking uses discard() so the set operation itself is safe.
-        # We just test the tracking side here.
-        sub._subscriptions.discard(b"nonexistent")
+        # NNG returns NNG_ENOENT when unsubscribing from a non-subscribed topic.
+        with pytest.raises(pynng.NNGException):
+            sub.unsubscribe(b"nonexistent")
         assert sub.subscriptions == frozenset()
 
 

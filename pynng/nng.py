@@ -902,6 +902,7 @@ class Sub0(Socket):
     def __init__(self, *, topics=None, **kwargs):
         super().__init__(**kwargs)
         self._subscriptions = set()
+        self._sub_lock = threading.RLock()
         if topics is None:
             return
         # special-case str/bytes
@@ -913,7 +914,8 @@ class Sub0(Socket):
     @property
     def subscriptions(self):
         """Return a frozenset of current subscriptions (as bytes)."""
-        return frozenset(self._subscriptions)
+        with self._sub_lock:
+            return frozenset(self._subscriptions)
 
     def subscribe(self, topic):
         """Subscribe to the specified topic.
@@ -928,9 +930,11 @@ class Sub0(Socket):
             desired behavior, just pass :class:`bytes` in as the topic.
 
         """
+        if isinstance(topic, str):
+            topic = topic.encode()
         options._setopt_string_nonnull(self, b"sub:subscribe", topic)
-        topic_bytes = topic.encode() if isinstance(topic, str) else topic
-        self._subscriptions.add(topic_bytes)
+        with self._sub_lock:
+            self._subscriptions.add(topic)
 
     def unsubscribe(self, topic):
         """Unsubscribe from the specified topic.
@@ -942,9 +946,11 @@ class Sub0(Socket):
             desired behavior, just pass :class:`bytes` in as the topic.
 
         """
+        if isinstance(topic, str):
+            topic = topic.encode()
         options._setopt_string_nonnull(self, b"sub:unsubscribe", topic)
-        topic_bytes = topic.encode() if isinstance(topic, str) else topic
-        self._subscriptions.discard(topic_bytes)
+        with self._sub_lock:
+            self._subscriptions.discard(topic)
 
     def subscribe_all(self, topics):
         """Subscribe to multiple topics at once.
@@ -958,7 +964,9 @@ class Sub0(Socket):
 
     def unsubscribe_all(self):
         """Unsubscribe from all current subscriptions."""
-        for topic in list(self._subscriptions):
+        with self._sub_lock:
+            current = list(self._subscriptions)
+        for topic in current:
             self.unsubscribe(topic)
 
 
