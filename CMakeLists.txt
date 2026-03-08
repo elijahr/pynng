@@ -75,21 +75,11 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(mbedtls)
 
 # Disable installation for mbedTLS targets
-if(TARGET mbedtls_static)
-    set_target_properties(mbedtls_static PROPERTIES EXCLUDE_FROM_ALL TRUE)
-endif()
-if(TARGET mbedx509_static)
-    set_target_properties(mbedx509_static PROPERTIES EXCLUDE_FROM_ALL TRUE)
-endif()
-if(TARGET mbedcrypto_static)
-    set_target_properties(mbedcrypto_static PROPERTIES EXCLUDE_FROM_ALL TRUE)
-endif()
-if(TARGET everest)
-    set_target_properties(everest PROPERTIES EXCLUDE_FROM_ALL TRUE)
-endif()
-if(TARGET p256m)
-    set_target_properties(p256m PROPERTIES EXCLUDE_FROM_ALL TRUE)
-endif()
+foreach(_target mbedtls_static mbedx509_static mbedcrypto_static everest p256m)
+  if(TARGET ${_target})
+    set_target_properties(${_target} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+  endif()
+endforeach()
 
 # ============================================
 # NNG Configuration
@@ -132,23 +122,23 @@ FetchContent_Declare(
 
 # Override the install function to be selective
 function(install)
-    # Only allow installing our Python extension module and Python source files
-    if(ARGV0 STREQUAL "TARGETS" AND ARGV1 STREQUAL "_nng")
-        message(STATUS "Installing Python extension module: ${ARGV1}")
-        message(STATUS "  Target destination: ${ARGV3}")
-        message(STATUS "  Will be installed as: _nng${PYTHON_MODULE_SUFFIX}")
-        _install(${ARGV})
-    elseif(ARGV0 STREQUAL "DIRECTORY" AND ARGV1 MATCHES ".*pynng/")
-        message(STATUS "Installing Python source files")
-        _install(${ARGV})
-    else()
-        message(STATUS "Skipping install() for dependency: ${ARGV0} ${ARGV1}")
-    endif()
+  # Only allow installing our Python extension module and Python source files
+  if(ARGV0 STREQUAL "TARGETS" AND ARGV1 STREQUAL "_nng")
+    message(STATUS "Installing Python extension module: ${ARGV1}")
+    message(STATUS "  Target destination: ${ARGV3}")
+    message(STATUS "  Will be installed as: _nng${PYTHON_MODULE_SUFFIX}")
+    _install(${ARGV})
+  elseif(ARGV0 STREQUAL "DIRECTORY" AND ARGV1 MATCHES ".*pynng/")
+    message(STATUS "Installing Python source files")
+    _install(${ARGV})
+  else()
+    message(STATUS "Skipping install() for dependency: ${ARGV0} ${ARGV1}")
+  endif()
 endfunction()
 
 # Completely disable the export command
 function(export)
-    message(STATUS "Skipping export() for NNG")
+  message(STATUS "Skipping export() for NNG")
 endfunction()
 
 # Now use FetchContent_MakeAvailable to configure and build NNG

@@ -90,8 +90,11 @@ class TLSConfig:
             self.set_cert_key_file(cert_key_file, passwd)
 
     def __del__(self):
-        if self._tls_config is not None:
-            pynng.lib.nng_tls_config_free(self._tls_config)
+        try:
+            if self._tls_config is not None:
+                pynng.lib.nng_tls_config_free(self._tls_config)
+        except Exception:
+            pass
 
     def set_server_name(self, server_name):
         """
