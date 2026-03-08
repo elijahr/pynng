@@ -23,6 +23,8 @@ from .nng import (
     Listener,
     Dialer,
     Pipe,
+    PipeEvent,
+    PipeEventStream,
     Message,
 )
 
