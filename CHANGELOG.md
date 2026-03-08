@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `async with` context manager support for sockets (`async with pynng.Pair0() as sock:`)
 - `async for` iteration over received messages (`async for msg in sock:`)
 - `aclose()` method for explicit async socket cleanup
+- `async with` context manager support for `Dialer` and `Listener`
+- `aclose()` method for `Dialer` and `Listener`
+- `recv_timeout` and `send_timeout` option descriptors on `Context` for per-context timeout control
 - `Sub0.subscriptions` property to inspect current subscriptions as a frozenset
 - `Sub0.subscribe_all(topics)` for batch subscription to multiple topics
 - `Sub0.unsubscribe_all()` to clear all current subscriptions
