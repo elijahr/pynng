@@ -6,6 +6,7 @@ Provides a Pythonic interface to cffi nng bindings
 import asyncio
 import collections
 import logging
+import math
 import threading
 import atexit
 
@@ -55,7 +56,7 @@ class PipeEventStream:
             self._loop = asyncio.get_running_loop()
         elif self._backend == "trio":
             import trio
-            self._send_channel, self._receive_channel = trio.open_memory_channel(128)
+            self._send_channel, self._receive_channel = trio.open_memory_channel(math.inf)
             self._trio_token = trio.lowlevel.current_trio_token()
         else:
             raise ValueError(
@@ -74,14 +75,21 @@ class PipeEventStream:
         if self._backend == "asyncio":
             self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
         elif self._backend == "trio":
-            import trio
-            try:
-                trio.from_thread.run_sync(
-                    self._send_channel.send_nowait, event,
-                    trio_token=self._trio_token,
-                )
-            except (trio.ClosedResourceError, trio.WouldBlock):
-                pass
+            self._trio_token.run_sync_soon(
+                self._trio_send_nowait, event,
+            )
+
+    def _trio_send_nowait(self, event):
+        """Wrapper for send_nowait that suppresses ClosedResourceError.
+
+        Called via ``run_sync_soon`` from a foreign thread, so any exception
+        raised here would crash the Trio event loop.
+        """
+        import trio
+        try:
+            self._send_channel.send_nowait(event)
+        except trio.ClosedResourceError:
+            pass
 
     def _on_pre_add(self, pipe):
         self._put_event(PipeEvent(pipe=pipe, event_type="pre_add"))
@@ -1065,6 +1073,7 @@ class Sub0(Socket):
     def __init__(self, *, topics=None, **kwargs):
         super().__init__(**kwargs)
         self._subscriptions = set()
+        self._sub_lock = threading.RLock()
         if topics is None:
             return
         # special-case str/bytes
@@ -1076,7 +1085,8 @@ class Sub0(Socket):
     @property
     def subscriptions(self):
         """Return a frozenset of current subscriptions (as bytes)."""
-        return frozenset(self._subscriptions)
+        with self._sub_lock:
+            return frozenset(self._subscriptions)
 
     def subscribe(self, topic):
         """Subscribe to the specified topic.
@@ -1091,9 +1101,11 @@ class Sub0(Socket):
             desired behavior, just pass :class:`bytes` in as the topic.
 
         """
+        if isinstance(topic, str):
+            topic = topic.encode()
         options._setopt_string_nonnull(self, b"sub:subscribe", topic)
-        topic_bytes = topic.encode() if isinstance(topic, str) else topic
-        self._subscriptions.add(topic_bytes)
+        with self._sub_lock:
+            self._subscriptions.add(topic)
 
     def unsubscribe(self, topic):
         """Unsubscribe from the specified topic.
@@ -1105,9 +1117,11 @@ class Sub0(Socket):
             desired behavior, just pass :class:`bytes` in as the topic.
 
         """
+        if isinstance(topic, str):
+            topic = topic.encode()
         options._setopt_string_nonnull(self, b"sub:unsubscribe", topic)
-        topic_bytes = topic.encode() if isinstance(topic, str) else topic
-        self._subscriptions.discard(topic_bytes)
+        with self._sub_lock:
+            self._subscriptions.discard(topic)
 
     def subscribe_all(self, topics):
         """Subscribe to multiple topics at once.
@@ -1121,7 +1135,9 @@ class Sub0(Socket):
 
     def unsubscribe_all(self):
         """Unsubscribe from all current subscriptions."""
-        for topic in list(self._subscriptions):
+        with self._sub_lock:
+            current = list(self._subscriptions)
+        for topic in current:
             self.unsubscribe(topic)
 
 
@@ -1223,25 +1239,40 @@ class Surveyor0(Socket):
         if survey_time is not None:
             self.survey_time = survey_time
 
-    async def asurvey(self, data, *, timeout=None):
+    async def asurvey(self, data, *, timeout=None, max_responses=None):
         """Send a survey and collect all responses until timeout.
 
         Args:
             data: Survey message to send (bytes).
             timeout: Response collection timeout in ms. If None, uses
                 the socket's recv_timeout.
+            max_responses: Maximum number of responses to collect. If
+                None (the default), collects all responses until timeout.
+                Useful for bounding memory usage when the number of
+                respondents is unknown.
 
         Returns:
-            list[bytes]: All responses received before timeout.
+            list[bytes]: All responses received before timeout or
+            max_responses limit.
+
+        Note:
+            The survey protocol does not support nng contexts, so when a
+            ``timeout`` is provided this method temporarily modifies the
+            socket-level ``recv_timeout``. A try/finally block ensures the
+            original value is restored, but callers sharing the socket
+            across concurrent tasks should be aware this is not task-safe.
+            If task-safety is required, use a dedicated socket per task.
         """
+        old_timeout = self.recv_timeout
         if timeout is not None:
-            old_timeout = self.recv_timeout
             self.recv_timeout = timeout
 
         try:
             await self.asend(data)
             responses = []
             while True:
+                if max_responses is not None and len(responses) >= max_responses:
+                    break
                 try:
                     response = await self.arecv()
                     responses.append(response)
@@ -1249,8 +1280,7 @@ class Surveyor0(Socket):
                     break
             return responses
         finally:
-            if timeout is not None:
-                self.recv_timeout = old_timeout
+            self.recv_timeout = old_timeout
 
 
 class Respondent0(Socket):
