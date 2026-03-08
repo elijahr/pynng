@@ -175,7 +175,7 @@ def test_socket_del_after_bad_init():
     # Socket() with no opener should fail but not cause AttributeError in __del__
     try:
         pynng.Socket()
-    except Exception:
+    except TypeError:
         pass
     stderr_capture = io.StringIO()
     with contextlib.redirect_stderr(stderr_capture):
