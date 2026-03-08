@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `socket.pipe_events()` returns an async iterator of `PipeEvent` objects for consuming pipe connect/disconnect events (`async for event in socket.pipe_events()`)
 
 ### Changed
+- Switch cibuildwheel to uv build frontend to avoid GitHub rate limiting on virtualenv downloads
 - Migrate build system from setuptools/CMake to scikit-build-core with headerkit for C header generation
 - Replace handwritten CFFI bindings with auto-generated bindings from NNG headers via headerkit
 - Add CI concurrency groups to cancel stale workflow runs
