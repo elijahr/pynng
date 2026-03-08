@@ -66,6 +66,7 @@ cmake.build-type = "Release"
 version_file = "pynng/_version.py"
 
 [tool.cibuildwheel]
+build-frontend = "build[uv]"
 test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio", "headerkit>=0.7.1"]
 # test_build.py tests the build system (header parsing via libclang), not the installed wheel.
 # It runs in smoketest (source checkout with build deps); cibuildwheel tests the installed wheel.
@@ -82,18 +83,18 @@ build-verbosity = 1
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-before-build = "pip install 'headerkit>=0.7.1' && python -m headerkit.install_libclang --skip-verify"
+before-build = "uv run --with 'headerkit>=0.7.1' python -m headerkit.install_libclang --skip-verify"
 
 [tool.cibuildwheel.windows]
 # Windows builds fail because they try to use the same directory for different
 # architectures, and that's no good.
-before-build = "pip install \"headerkit>=0.7.1\" && python -m headerkit.install_libclang --skip-verify && bash .github/rmstuff.sh"
+before-build = "uv run --with \"headerkit>=0.7.1\" python -m headerkit.install_libclang --skip-verify && bash .github/rmstuff.sh"
 environment = { PATH = "C:\\Program Files\\LLVM\\bin;$PATH" }
 
 [tool.cibuildwheel.macos]
 # Specify universal2 building for macOS
 archs = ["universal2"]
-before-build = "pip install 'headerkit>=0.7.1' && python -m headerkit.install_libclang --skip-verify"
+before-build = "uv run --with 'headerkit>=0.7.1' python -m headerkit.install_libclang --skip-verify"
 
 environment = { CMAKE_OSX_ARCHITECTURES = "x86_64;arm64" }
 
