@@ -4,7 +4,7 @@
 # script should ensure that it is built before running.  It looks in this file
 # to see what the expected object file is based on the platform.
 from cffi import FFI
-import os, sysconfig
+import os
 import sys
 
 ffibuilder = FFI()
@@ -40,9 +40,6 @@ else:
     # this is a pretty gross heuristic... but let's go with it anyway.
     # it would be better to get linker information from cmake somehow.
     # Building process will be broken if add -latomic in Mac with clang. https://github.com/nodejs/node/pull/30099
-    clang = (os.environ.get("CC") == "clang") or (
-        sysconfig.get_config_var("CC") == "clang"
-    )
     if os.uname().sysname == "Darwin":
         # don't link libatomic on Mac
         pass
