@@ -23,7 +23,13 @@ def test_abstract_addr_in_type_to_str():
 
 
 def test_nng_sockaddr_dispatch_includes_abstract():
-    """Test that _nng_sockaddr correctly dispatches NNG_AF_ABSTRACT to AbstractAddr"""
+    """Test that _nng_sockaddr correctly dispatches NNG_AF_ABSTRACT to AbstractAddr.
+
+    NOTE: Uses Python mock objects to simulate CFFI structs.
+    This tests the Python-side dispatch logic but cannot catch issues
+    with actual CFFI memory access patterns. See Linux-specific tests
+    for real CFFI integration coverage.
+    """
     from pynng.sockaddr import _nng_sockaddr
 
     # Create a mock sockaddr with abstract family to verify dispatch
@@ -106,7 +112,6 @@ def test_abstract_socket_with_special_chars():
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Abstract sockets are Linux-specific"
 )
-@pytest.mark.xfail(strict=True, reason="NNG abstract socket auto-bind may not be supported")
 def test_abstract_socket_auto_bind():
     """Test that abstract sockets can auto-bind (assign a random name).
 
@@ -118,8 +123,8 @@ def test_abstract_socket_auto_bind():
     abstract_addr = "abstract://"
 
     with pynng.Pair0(listen=abstract_addr, recv_timeout=1000) as sock1:
-        # If we get here without error, auto-bind (or empty-name listen) succeeded
-        assert sock1.name == "pair0"
+        # If auto-bind works, the socket should have a listener with an address
+        assert len(sock1.listeners) > 0, "Auto-bind should create a listener"
 
 
 @pytest.mark.skipif(
@@ -141,41 +146,41 @@ def test_abstract_socket_with_different_protocols():
             recv_timeout=1000
         ) as client:
             if server_proto == pynng.Pub0 and client_proto == pynng.Sub0:
-                # Special handling for pub/sub
+                # pub/sub: subscriber must subscribe before receiving
                 server.listen(abstract_addr)
                 client.dial(abstract_addr)
                 client.subscribe("")  # Subscribe to all messages
                 wait_pipe_len(server, 1)
                 server.send(b"pubsub test")
                 received = client.recv()
-                assert received == b"pubsub test"
+                assert received == b"pubsub test", f"Failed for protocol: {proto_name}"
             elif server_proto == pynng.Push0 and client_proto == pynng.Pull0:
-                # Special handling for push/pull
+                # push/pull: unidirectional from push to pull
                 server.listen(abstract_addr)
                 client.dial(abstract_addr)
                 wait_pipe_len(server, 1)
                 server.send(b"pushpull test")
                 received = client.recv()
-                assert received == b"pushpull test"
+                assert received == b"pushpull test", f"Failed for protocol: {proto_name}"
             elif server_proto == pynng.Req0 and client_proto == pynng.Rep0:
-                # Special handling for req/rep
+                # req/rep: rep listens, req dials; req sends then rep replies
                 client.listen(abstract_addr)
                 server.dial(abstract_addr)
                 wait_pipe_len(client, 1)
                 server.send(b"reqrep test")
                 received = client.recv()
-                assert received == b"reqrep test"
+                assert received == b"reqrep test", f"Failed recv for protocol: {proto_name}"
                 client.send(b"reply")
                 reply = server.recv()
-                assert reply == b"reply"
+                assert reply == b"reply", f"Failed reply for protocol: {proto_name}"
             else:
-                # Default handling for pair protocols
+                # pair: bidirectional, either side can send first
                 server.listen(abstract_addr)
                 client.dial(abstract_addr)
                 wait_pipe_len(server, 1)
                 server.send(b"pair test")
                 received = client.recv()
-                assert received == b"pair test"
+                assert received == b"pair test", f"Failed for protocol: {proto_name}"
 
 
 @pytest.mark.skipif(
@@ -191,7 +196,13 @@ def test_abstract_socket_error_on_non_linux():
 
 
 def test_abstract_addr_name_bytes():
-    """Test AbstractAddr name_bytes property"""
+    """Test AbstractAddr name_bytes property.
+
+    NOTE: Uses Python mock objects to simulate CFFI structs.
+    This tests the Python-side dispatch logic but cannot catch issues
+    with actual CFFI memory access patterns. See Linux-specific tests
+    for real CFFI integration coverage.
+    """
 
     # Create a mock abstract sockaddr
     class MockAbstractSockAddr:
@@ -218,8 +229,14 @@ def test_abstract_addr_name_bytes():
     assert name_bytes == b"test\x00"
 
 
-def test_abstract_addr_name_with_uri_encoding():
-    """Test AbstractAddr name property with NUL bytes and URI decoding"""
+def test_abstract_addr_name_with_null_bytes():
+    """Test AbstractAddr name property with embedded NUL bytes in raw name data.
+
+    NOTE: Uses Python mock objects to simulate CFFI structs.
+    This tests the Python-side dispatch logic but cannot catch issues
+    with actual CFFI memory access patterns. See Linux-specific tests
+    for real CFFI integration coverage.
+    """
 
     class MockAbstractSockAddr:
         def __init__(self):
@@ -242,7 +259,13 @@ def test_abstract_addr_name_with_uri_encoding():
 
 
 def test_abstract_addr_str_representation():
-    """Test AbstractAddr string representation"""
+    """Test AbstractAddr string representation.
+
+    NOTE: Uses Python mock objects to simulate CFFI structs.
+    This tests the Python-side dispatch logic but cannot catch issues
+    with actual CFFI memory access patterns. See Linux-specific tests
+    for real CFFI integration coverage.
+    """
 
     class MockAbstractSockAddr:
         def __init__(self):
