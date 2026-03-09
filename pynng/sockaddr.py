@@ -1,6 +1,5 @@
 import socket
 import struct
-import urllib.parse
 
 import pynng
 
@@ -161,6 +160,7 @@ class AbstractAddr(SockAddr):
     @property
     def name(self):
         # Decode the name bytes, handling any URI encoding
+        import urllib.parse
         name_bytes = self.name_bytes
         try:
             # Try to decode as UTF-8 first
@@ -173,6 +173,7 @@ class AbstractAddr(SockAddr):
 
     def __str__(self):
         # Return the abstract socket URI format
+        import urllib.parse
         try:
             # Try to encode as UTF-8 and URI-encode
             name_str = self.name_bytes.decode('utf-8')
