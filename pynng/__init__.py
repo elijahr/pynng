@@ -1,6 +1,5 @@
 # provide the API
-from importlib.metadata import version
-__version__ = version("pynng")
+from ._version import __version__
 from ._nng import lib, ffi
 from .nng import (
     Bus0,
