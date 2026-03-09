@@ -186,14 +186,13 @@ The name assigned can be retrieved using the ``NNG_OPT_LOCADDR`` option.
 
 .. code-block:: python
 
-    import sys
     import pynng
     import platform
 
     # Check if we're on Linux
     if platform.system() != "Linux":
         print("Abstract sockets are only supported on Linux")
-        sys.exit(1)
+        exit(1)
 
     # Create a socket with abstract address
     with pynng.Pair0() as sock:
