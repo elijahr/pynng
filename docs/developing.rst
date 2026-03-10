@@ -9,10 +9,11 @@ Build System
 pynng uses `scikit-build-core`_ as its build backend (configured in
 ``pyproject.toml``). The build process:
 
-1. CMake fetches NNG and mbedTLS via ``FetchContent``
+1. CMake fetches NNG (v1 and optionally v2) and a TLS library (mbedTLS by
+   default, or wolfSSL) via ``FetchContent``
 2. `headerkit`_ parses NNG's C headers using libclang to auto-generate CFFI
-   bindings (``pynng/_nng.py``)
-3. CFFI compiles the extension module
+   bindings (``pynng/_nng.py`` for v1, ``pynng/_nng_v2.py`` for v2)
+3. CFFI compiles the extension module(s)
 4. `setuptools-scm`_ derives the version from git tags
 
 Install for development with:
@@ -21,12 +22,31 @@ Install for development with:
 
    uv pip install -e '.[dev]'
 
+Build Options
+-------------
+
+TLS engine selection:
+
+.. code-block:: bash
+
+   # Default (mbedTLS)
+   uv pip install -e '.[dev]'
+
+   # wolfSSL
+   uv pip install -e '.[dev]' -C cmake.args="-DPYNNG_TLS_ENGINE=wolf"
+
+   # Disable v2 module
+   uv pip install -e '.[dev]' -C cmake.args="-DBUILD_NNG_V2=OFF"
+
+See the :doc:`installation` page for the full list of options and TLS engine
+compatibility.
+
 Testing without pulling dependencies from GitHub
 -------------------------------------------------
 
-By default, CMake's ``FetchContent`` downloads NNG and mbedTLS from GitHub during
-the build. To speed up development iteration, you can point the build to local
-clones instead by passing CMake defines:
+By default, CMake's ``FetchContent`` downloads NNG and the TLS library from
+GitHub during the build. To speed up development iteration, you can point the
+build to local clones instead by passing CMake defines:
 
 .. code-block:: bash
 
@@ -38,6 +58,12 @@ clones instead by passing CMake defines:
    pip install -e . \
      -C cmake.define.FETCHCONTENT_SOURCE_DIR_NNG=$HOME/deps/nng \
      -C cmake.define.FETCHCONTENT_SOURCE_DIR_MBEDTLS=$HOME/deps/mbedtls
+
+   # For wolfSSL:
+   git clone https://github.com/wolfSSL/wolfssl ~/deps/wolfssl
+   pip install -e . \
+     -C cmake.args="-DPYNNG_TLS_ENGINE=wolf" \
+     -C cmake.define.FETCHCONTENT_SOURCE_DIR_WOLFSSL=$HOME/deps/wolfssl
 
 Testing CI changes
 ------------------
