@@ -297,9 +297,16 @@ if(BUILD_NNG_V2)
   # _MBEDTLS_V2_OR_NEWER is pre-cached to bypass FindMbedTLS.cmake's
   # check_symbol_exists(mbedtls_ssl_init) which fails when linking static
   # mbedTLS without -lpthread. We know mbedTLS 3.x has this symbol.
+  # Define the install directory upfront as an absolute path.
+  # ExternalProject_Get_Property(INSTALL_DIR) can return a relative path
+  # when INSTALL_DIR isn't explicitly set, which breaks IMPORTED_LOCATION
+  # in cross-compilation environments like cibuildwheel.
+  set(NNG_V2_INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/nng_v2_install")
+
   ExternalProject_Add(nng_v2_build
     SOURCE_DIR ${nng_v2_SOURCE_DIR}
     PREFIX ${CMAKE_CURRENT_BINARY_DIR}/nng_v2_build-prefix
+    INSTALL_DIR ${NNG_V2_INSTALL_DIR}
     DEPENDS mbedtls_stage
     CMAKE_ARGS
       -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
@@ -318,10 +325,6 @@ if(BUILD_NNG_V2)
       -D_MBEDTLS_V2_OR_NEWER:INTERNAL=TRUE
     BUILD_BYPRODUCTS ${NNG_V2_STATIC_LIB}
   )
-
-  # Create an imported target for the v2 static library
-  ExternalProject_Get_Property(nng_v2_build INSTALL_DIR)
-  set(NNG_V2_INSTALL_DIR ${INSTALL_DIR})
 
   add_library(nng_v2_imported STATIC IMPORTED)
   if(WIN32)
