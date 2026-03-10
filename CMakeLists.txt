@@ -128,7 +128,7 @@ FetchContent_Declare(
   GIT_REPOSITORY ${NNG_REPO}
   GIT_TAG ${NNG_REV}
   GIT_SHALLOW TRUE
-  PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/nng-mbedtls-hostname.patch
+  PATCH_COMMAND git apply --reverse --check ${CMAKE_CURRENT_SOURCE_DIR}/patches/nng-mbedtls-hostname.patch || git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/nng-mbedtls-hostname.patch
 )
 
 # ============================================
@@ -243,14 +243,19 @@ endif()
 if(BUILD_NNG_V2)
   include(ExternalProject)
 
-  # Download nng v2 source via FetchContent (download only, no add_subdirectory)
+  # Download nng v2 source via FetchContent (download only, no add_subdirectory).
+  # We use FetchContent_Populate instead of FetchContent_MakeAvailable because
+  # MakeAvailable would call add_subdirectory, causing a CMake target collision
+  # with v1's "nng" target. The v2 source is built separately via ExternalProject.
   FetchContent_Declare(
     nng_v2
     GIT_REPOSITORY ${NNG_V2_REPO}
     GIT_TAG ${NNG_V2_REV}
     GIT_SHALLOW TRUE
   )
+  cmake_policy(SET CMP0169 OLD)
   FetchContent_Populate(nng_v2)
+  cmake_policy(SET CMP0169 NEW)
 
   # Determine the static library path based on platform
   if(WIN32)
@@ -259,11 +264,36 @@ if(BUILD_NNG_V2)
     set(NNG_V2_STATIC_LIB "<INSTALL_DIR>/lib/libnng.a")
   endif()
 
+  # Stage mbedTLS headers and libraries so the v2 ExternalProject can find them.
+  # The v1 build already fetched and built mbedTLS via FetchContent; we create a
+  # staging directory that looks like an installed mbedTLS for find_package().
+  set(MBEDTLS_STAGE_DIR "${CMAKE_CURRENT_BINARY_DIR}/mbedtls-stage")
+  file(MAKE_DIRECTORY "${MBEDTLS_STAGE_DIR}/include")
+  file(MAKE_DIRECTORY "${MBEDTLS_STAGE_DIR}/lib")
+
+  # Copy headers at configure time (they exist after FetchContent_MakeAvailable)
+  file(COPY "${mbedtls_SOURCE_DIR}/include/mbedtls" DESTINATION "${MBEDTLS_STAGE_DIR}/include")
+  file(COPY "${mbedtls_SOURCE_DIR}/include/psa" DESTINATION "${MBEDTLS_STAGE_DIR}/include")
+
+  # Create a custom target that stages the built mbedTLS libraries after they are compiled.
+  # The libraries don't exist at configure time, so we copy them at build time.
+  add_custom_target(mbedtls_stage ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "$<TARGET_FILE:mbedtls>" "${MBEDTLS_STAGE_DIR}/lib/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "$<TARGET_FILE:mbedx509>" "${MBEDTLS_STAGE_DIR}/lib/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "$<TARGET_FILE:mbedcrypto>" "${MBEDTLS_STAGE_DIR}/lib/"
+    DEPENDS mbedtls mbedx509 mbedcrypto
+    COMMENT "Staging mbedTLS libraries for nng v2 build"
+  )
+
   # Build nng v2 in a completely isolated build tree via ExternalProject_Add.
   # This avoids CMake target name collision with v1 (both define a target "nng").
-  # v2's nng will fetch and build its own mbedTLS internally.
+  # We pass MBEDTLS_ROOT so v2's find_package(MbedTLS) finds our staged copy.
   ExternalProject_Add(nng_v2_build
     SOURCE_DIR ${nng_v2_SOURCE_DIR}
+    DEPENDS mbedtls_stage
     CMAKE_ARGS
       -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
       -DCMAKE_POSITION_INDEPENDENT_CODE=ON
@@ -274,6 +304,7 @@ if(BUILD_NNG_V2)
       -DNNG_ENABLE_STATS=OFF
       -DNNG_ENABLE_NNGCAT=OFF
       -DBUILD_SHARED_LIBS=OFF
+      -DMBEDTLS_ROOT=${MBEDTLS_STAGE_DIR}
     BUILD_BYPRODUCTS ${NNG_V2_STATIC_LIB}
   )
 
