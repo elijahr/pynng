@@ -128,7 +128,9 @@ FetchContent_Declare(
   GIT_REPOSITORY ${NNG_REPO}
   GIT_TAG ${NNG_REV}
   GIT_SHALLOW TRUE
-  PATCH_COMMAND git apply --reverse --check ${CMAKE_CURRENT_SOURCE_DIR}/patches/nng-mbedtls-hostname.patch || git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/nng-mbedtls-hostname.patch
+  PATCH_COMMAND ${CMAKE_COMMAND}
+    -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/patches/nng-mbedtls-hostname.patch
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/idempotent_patch.cmake
 )
 
 # ============================================
@@ -297,6 +299,7 @@ if(BUILD_NNG_V2)
   # mbedTLS without -lpthread. We know mbedTLS 3.x has this symbol.
   ExternalProject_Add(nng_v2_build
     SOURCE_DIR ${nng_v2_SOURCE_DIR}
+    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/nng_v2_build-prefix
     DEPENDS mbedtls_stage
     CMAKE_ARGS
       -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
