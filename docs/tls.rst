@@ -9,6 +9,19 @@ wraps NNG's TLS configuration.
    :local:
    :depth: 1
 
+TLS Engine
+----------
+
+pynng supports multiple TLS backends. By default, mbedTLS is used. You can
+select a different engine at build time (see :doc:`installation` for details):
+
+- **mbedTLS** (default): Built from source. Works with both NNG v1 and v2.
+- **wolfSSL**: Built from source. Works with both NNG v1 and v2.
+- **OpenSSL 3.5+**: System library. NNG v2 only.
+
+The Python API for TLS configuration is the same regardless of which engine
+is used.
+
 Overview
 --------
 
