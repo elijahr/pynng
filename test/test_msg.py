@@ -1,36 +1,39 @@
-import pytest
-import pynng
-from _test_util import wait_pipe_len
+import gc
 
-addr = "inproc://test-addr"
+import pytest
+
+from _test_util import wait_pipe_len
+from conftest import unique_inproc_addr
 
 # timeout, ms
 to = 1000
 
 
-def test_socket_send_recv_msg_from_pipe():
-    with pynng.Pair0(listen=addr, recv_timeout=to) as s1, pynng.Pair0(
+def test_socket_send_recv_msg_from_pipe(nng):
+    addr = unique_inproc_addr()
+    with nng.Pair0(listen=addr, recv_timeout=to) as s1, nng.Pair0(
         dial=addr, recv_timeout=to
     ) as s2:
         wait_pipe_len(s1, 1)
         pipe = s1.pipes[0]
-        msg = pynng.Message(b"oh hello friend", pipe)
-        assert isinstance(msg, pynng.Message)
+        msg = nng.Message(b"oh hello friend", pipe)
+        assert isinstance(msg, nng.Message)
         assert msg.bytes == b"oh hello friend"
         s1.send_msg(msg)
         assert msg.pipe is pipe
         msg2 = s2.recv_msg()
-        assert isinstance(msg2, pynng.Message)
+        assert isinstance(msg2, nng.Message)
         assert msg2.bytes == b"oh hello friend"
         assert msg2.pipe is s2.pipes[0]
 
 
-def test_socket_send_recv_msg():
-    with pynng.Pair0(listen=addr, recv_timeout=to) as s1, pynng.Pair0(
+def test_socket_send_recv_msg(nng):
+    addr = unique_inproc_addr()
+    with nng.Pair0(listen=addr, recv_timeout=to) as s1, nng.Pair0(
         dial=addr, recv_timeout=to
     ) as s2:
         wait_pipe_len(s1, 1)
-        msg = pynng.Message(b"we are friends, old buddy")
+        msg = nng.Message(b"we are friends, old buddy")
         s1.send_msg(msg)
         msg2 = s2.recv_msg()
         assert msg2.bytes == b"we are friends, old buddy"
@@ -40,12 +43,13 @@ def test_socket_send_recv_msg():
 
 
 @pytest.mark.trio
-async def test_socket_arecv_asend_msg():
-    with pynng.Pair0(listen=addr, recv_timeout=to) as s1, pynng.Pair0(
+async def test_socket_arecv_asend_msg(nng):
+    addr = unique_inproc_addr()
+    with nng.Pair0(listen=addr, recv_timeout=to) as s1, nng.Pair0(
         dial=addr, recv_timeout=to
     ) as s2:
         wait_pipe_len(s1, 1)
-        msg = pynng.Message(b"you truly are a pal")
+        msg = nng.Message(b"you truly are a pal")
         await s1.asend_msg(msg)
         msg2 = await s2.arecv_msg()
         assert msg2.bytes == b"you truly are a pal"
@@ -53,56 +57,59 @@ async def test_socket_arecv_asend_msg():
 
 
 @pytest.mark.trio
-async def test_context_arecv_asend_msg():
-    with pynng.Req0(listen=addr, recv_timeout=to) as s1, pynng.Rep0(
+async def test_context_arecv_asend_msg(nng):
+    addr = unique_inproc_addr()
+    with nng.Req0(listen=addr, recv_timeout=to) as s1, nng.Rep0(
         dial=addr, recv_timeout=to
     ) as s2:
         with s1.new_context() as ctx1, s2.new_context() as ctx2:
             wait_pipe_len(s1, 1)
-            msg = pynng.Message(b"do i even know you")
+            msg = nng.Message(b"do i even know you")
             await ctx1.asend_msg(msg)
             msg2 = await ctx2.arecv_msg()
             assert msg2.pipe is s2.pipes[0]
             assert msg2.bytes == b"do i even know you"
-            msg3 = pynng.Message(b"yes of course i am your favorite platypus")
+            msg3 = nng.Message(b"yes of course i am your favorite platypus")
             await ctx2.asend_msg(msg3)
             msg4 = await ctx1.arecv_msg()
             assert msg4.pipe is s1.pipes[0]
             assert msg4.bytes == b"yes of course i am your favorite platypus"
 
 
-def test_context_recv_send_msg():
-    with pynng.Req0(listen=addr, recv_timeout=to) as s1, pynng.Rep0(
+def test_context_recv_send_msg(nng):
+    addr = unique_inproc_addr()
+    with nng.Req0(listen=addr, recv_timeout=to) as s1, nng.Rep0(
         dial=addr, recv_timeout=to
     ) as s2:
         with s1.new_context() as ctx1, s2.new_context() as ctx2:
             wait_pipe_len(s1, 1)
-            msg = pynng.Message(b"do i even know you")
+            msg = nng.Message(b"do i even know you")
             ctx1.send_msg(msg)
             msg2 = ctx2.recv_msg()
             assert msg2.pipe is s2.pipes[0]
             assert msg2.bytes == b"do i even know you"
-            msg3 = pynng.Message(b"yes of course i am your favorite platypus")
+            msg3 = nng.Message(b"yes of course i am your favorite platypus")
             ctx2.send_msg(msg3)
             msg4 = ctx1.recv_msg()
             assert msg4.pipe is s1.pipes[0]
             assert msg4.bytes == b"yes of course i am your favorite platypus"
 
 
-def test_cannot_double_send():
+def test_cannot_double_send(nng):
+    addr = unique_inproc_addr()
     # double send would cause a SEGFAULT!!! That's no good
-    with pynng.Req0(listen=addr, recv_timeout=to) as s1, pynng.Rep0(
+    with nng.Req0(listen=addr, recv_timeout=to) as s1, nng.Rep0(
         dial=addr, recv_timeout=to
     ) as s2:
-        msg = pynng.Message(b"this is great")
+        msg = nng.Message(b"this is great")
         s1.send_msg(msg)
-        with pytest.raises(pynng.MessageStateError):
+        with pytest.raises(nng.MessageStateError):
             s1.send_msg(msg)
 
         with s1.new_context() as ctx:
-            msg = pynng.Message(b"this also is great")
+            msg = nng.Message(b"this also is great")
             ctx.send_msg(msg)
-            with pytest.raises(pynng.MessageStateError):
+            with pytest.raises(nng.MessageStateError):
                 ctx.send_msg(msg)
 
         # don't really need to receive, but linters hate not using s2
@@ -110,60 +117,61 @@ def test_cannot_double_send():
 
 
 @pytest.mark.trio
-async def test_cannot_double_asend():
+async def test_cannot_double_asend(nng):
+    addr = unique_inproc_addr()
     # double send would cause a SEGFAULT!!! That's no good
-    with pynng.Req0(listen=addr, recv_timeout=to) as s1, pynng.Rep0(
+    with nng.Req0(listen=addr, recv_timeout=to) as s1, nng.Rep0(
         dial=addr, recv_timeout=to
     ) as s2:
-        msg = pynng.Message(b"this is great")
+        msg = nng.Message(b"this is great")
         await s1.asend_msg(msg)
-        with pytest.raises(pynng.MessageStateError):
+        with pytest.raises(nng.MessageStateError):
             await s1.asend_msg(msg)
 
         with s1.new_context() as ctx:
-            msg = pynng.Message(b"this also is great")
+            msg = nng.Message(b"this also is great")
             await ctx.asend_msg(msg)
-            with pytest.raises(pynng.MessageStateError):
+            with pytest.raises(nng.MessageStateError):
                 await ctx.asend_msg(msg)
 
         # don't really need to receive, but linters hate not using s2
         await s2.arecv_msg()
 
 
-def test_message_del_without_send():
-    import gc
-    msg = pynng.Message(b"never sent")
+def test_message_del_without_send(nng):
+    msg = nng.Message(b"never sent")
     del msg
     gc.collect()  # should free once without error
 
 
-def test_message_del_after_send():
-    import gc
-    with pynng.Pair0(listen="inproc://test-msg-del", recv_timeout=1000) as s1, \
-         pynng.Pair0(dial="inproc://test-msg-del", recv_timeout=1000) as s2:
+def test_message_del_after_send(nng):
+    addr = unique_inproc_addr()
+    with nng.Pair0(listen=addr, recv_timeout=1000) as s1, \
+         nng.Pair0(dial=addr, recv_timeout=1000) as s2:
         wait_pipe_len(s1, 1)
-        msg = pynng.Message(b"test data")
+        msg = nng.Message(b"test data")
         s1.send_msg(msg)
         assert s2.recv() == b"test data"
         del msg
         gc.collect()  # should not double-free
 
 
-def test_message_pipe_setter_rejects_non_pipe():
-    msg = pynng.Message(b"test")
+def test_message_pipe_setter_rejects_non_pipe(nng):
+    msg = nng.Message(b"test")
     with pytest.raises(ValueError):
         msg.pipe = "not a pipe"
     with pytest.raises(ValueError):
         msg.pipe = 42
 
 
-def test_message_mem_freed_after_send():
+def test_message_mem_freed_after_send(nng):
     """Verify that sending a message marks it as freed so __del__ doesn't double-free"""
-    with pynng.Req0(listen=addr, recv_timeout=to) as s1, pynng.Rep0(
+    addr = unique_inproc_addr()
+    with nng.Req0(listen=addr, recv_timeout=to) as s1, nng.Rep0(
         dial=addr, recv_timeout=to
     ) as s2:
         wait_pipe_len(s1, 1)
-        msg = pynng.Message(b"test data")
+        msg = nng.Message(b"test data")
         assert not msg._mem_freed
         s1.send_msg(msg)
         assert msg._mem_freed

@@ -4,14 +4,13 @@ import itertools
 import pytest
 import trio
 
-import pynng
-
-addr = "inproc://test-addr"
+from conftest import unique_inproc_addr
 
 
 @pytest.mark.asyncio
-async def test_arecv_asend_asyncio():
-    with pynng.Pair0(listen=addr, recv_timeout=1000) as listener, pynng.Pair0(
+async def test_arecv_asend_asyncio(nng):
+    addr = unique_inproc_addr()
+    with nng.Pair0(listen=addr, recv_timeout=1000) as listener, nng.Pair0(
         dial=addr
     ) as dialer:
         await dialer.asend(b"hello there buddy")
@@ -19,8 +18,9 @@ async def test_arecv_asend_asyncio():
 
 
 @pytest.mark.trio
-async def test_asend_arecv_trio():
-    with pynng.Pair0(listen=addr, recv_timeout=2000) as listener, pynng.Pair0(
+async def test_asend_arecv_trio(nng):
+    addr = unique_inproc_addr()
+    with nng.Pair0(listen=addr, recv_timeout=2000) as listener, nng.Pair0(
         dial=addr, send_timeout=2000
     ) as dialer:
         await dialer.asend(b"hello there")
@@ -28,22 +28,25 @@ async def test_asend_arecv_trio():
 
 
 @pytest.mark.trio
-async def test_arecv_trio_cancel():
-    with pynng.Pair0(listen=addr, recv_timeout=5000) as p0:
+async def test_arecv_trio_cancel(nng):
+    addr = unique_inproc_addr()
+    with nng.Pair0(listen=addr, recv_timeout=5000) as p0:
         with pytest.raises(trio.TooSlowError):
             with trio.fail_after(0.001):
                 await p0.arecv()
 
 
 @pytest.mark.asyncio
-async def test_arecv_asyncio_cancel():
+async def test_arecv_asyncio_cancel(nng):
+    addr = unique_inproc_addr()
+
     async def cancel_soon(fut, sleep_time=0.05):
         # need to sleep for some amount of time to ensure the arecv actually
         # had time to start.
         await asyncio.sleep(sleep_time)
         fut.cancel()
 
-    with pynng.Pair0(listen=addr, recv_timeout=5000) as p0:
+    with nng.Pair0(listen=addr, recv_timeout=5000) as p0:
         arecv = p0.arecv()
         fut = asyncio.ensure_future(arecv)
         with pytest.raises(asyncio.CancelledError):
@@ -51,21 +54,23 @@ async def test_arecv_asyncio_cancel():
 
 
 @pytest.mark.asyncio
-async def test_asend_asyncio_send_timeout():
-    with pytest.raises(pynng.exceptions.Timeout):
-        with pynng.Pair0(listen=addr, send_timeout=1) as p0:
+async def test_asend_asyncio_send_timeout(nng):
+    addr = unique_inproc_addr()
+    with pytest.raises(nng.Timeout):
+        with nng.Pair0(listen=addr, send_timeout=1) as p0:
             await p0.asend(b"foo")
 
 
 @pytest.mark.trio
-async def test_asend_trio_send_timeout():
-    with pytest.raises(pynng.exceptions.Timeout):
-        with pynng.Pair0(listen=addr, send_timeout=1) as p0:
+async def test_asend_trio_send_timeout(nng):
+    addr = unique_inproc_addr()
+    with pytest.raises(nng.Timeout):
+        with nng.Pair0(listen=addr, send_timeout=1) as p0:
             await p0.asend(b"foo")
 
 
 @pytest.mark.trio
-async def test_pub_sub_trio():
+async def test_pub_sub_trio(nng):
     """Demonstrate pub-sub protocol use with ``trio``.
 
     Start a publisher which publishes 1000 integers and marks each value
@@ -73,13 +78,14 @@ async def test_pub_sub_trio():
     the evens and 2 for consuming the odds) in separate tasks and have each
     one retreive values and verify the parity.
     """
+    addr = unique_inproc_addr()
     sentinel_received = {}
 
     def is_even(i):
         return i % 2 == 0
 
     async def pub():
-        with pynng.Pub0(listen=addr) as pubber:
+        with nng.Pub0(listen=addr) as pubber:
             for i in range(20):
                 prefix = "even" if is_even(i) else "odd"
                 msg = "{}:{}".format(prefix, i)
@@ -96,7 +102,7 @@ async def test_pub_sub_trio():
         else:
             pred = lambda i: not is_even(i)
 
-        with pynng.Sub0(dial=addr, recv_timeout=5000) as subber:
+        with nng.Sub0(dial=addr, recv_timeout=5000) as subber:
             subber.subscribe(which + ":")
 
             data_count = 0
@@ -126,7 +132,10 @@ async def test_pub_sub_trio():
 
 
 @pytest.mark.trio
+@pytest.mark.nng_v1
 async def test_aio_invalid_backend():
+    """v1-only: tests pynng._aio.AIOHelper directly with v1 socket."""
+    import pynng
     from pynng import _aio
     with pynng.Pair0() as s:
         with pytest.raises(ValueError, match="not currently supported"):

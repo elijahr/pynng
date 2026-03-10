@@ -6,20 +6,24 @@ import pynng.options
 import pytest
 from pathlib import Path
 
+from conftest import unique_inproc_addr
+
 tcp_addr = "tcp://127.0.0.1:0"
-addr = "inproc://test-addr"
 
 
-def test_timeout_works():
-    with pynng.Pair0(listen=addr) as s0:
+def test_timeout_works(nng):
+    addr = unique_inproc_addr()
+    with nng.Pair0(listen=addr) as s0:
         # default is -1
         assert s0.recv_timeout == -1
         s0.recv_timeout = 1  # 1 ms, not too long
-        with pytest.raises(pynng.Timeout):
+        with pytest.raises(nng.Timeout):
             s0.recv()
 
 
+@pytest.mark.nng_v1
 def test_can_set_socket_name():
+    """v1-only: NNG_OPT_SOCKNAME removed in v2."""
     with pynng.Pair0() as p:
         assert p.name != "this"
         p.name = "this"
@@ -29,7 +33,9 @@ def test_can_set_socket_name():
         assert pynng.options._getopt_string(p, "socket-name") == "this"
 
 
+@pytest.mark.nng_v1
 def test_can_read_sock_raw():
+    """v1-only: uses pynng.lib directly for raw opener."""
     with pynng.Pair0() as cooked, pynng.Pair0(
         opener=pynng.lib.nng_pair0_open_raw
     ) as raw:
@@ -37,11 +43,12 @@ def test_can_read_sock_raw():
         assert raw.raw
 
 
-def test_dial_blocking_behavior():
+def test_dial_blocking_behavior(nng):
+    addr = unique_inproc_addr()
     # the default dial is different than the pynng library; it will log in the
     # event of a failure, but then continue.
-    with pynng.Pair1() as s0, pynng.Pair1() as s1:
-        with pytest.raises(pynng.ConnectionRefused):
+    with nng.Pair1() as s0, nng.Pair1() as s1:
+        with pytest.raises(nng.ConnectionRefused):
             s0.dial(addr, block=True)
 
         # default is to attempt
@@ -51,7 +58,9 @@ def test_dial_blocking_behavior():
         assert s1.recv() == b"what a message"
 
 
+@pytest.mark.nng_v1
 def test_can_set_recvmaxsize():
+    """v1-only: uses listener.local_address which requires nng_listener_get_addr (v1)."""
     from _test_util import wait_pipe_len
 
     with pynng.Pair1(
@@ -73,7 +82,9 @@ def test_can_set_recvmaxsize():
                 s0.recv()
 
 
+@pytest.mark.nng_v1
 def test_nng_sockaddr():
+    """v1-only: uses listener.local_address / pynng.sockaddr types."""
     with pynng.Pair1(recv_timeout=50, listen=tcp_addr) as s0:
         sa = s0.listeners[0].local_address
         assert isinstance(sa, pynng.sockaddr.InAddr)
@@ -111,9 +122,10 @@ def test_nng_sockaddr():
         assert str(sa) == "[::1]:{}".format(assigned_port)
 
 
-def test_resend_time():
+def test_resend_time(nng):
+    addr = unique_inproc_addr()
     # test req/rep resend time
-    with pynng.Rep0(listen=addr, recv_timeout=3000) as rep, pynng.Req0(
+    with nng.Rep0(listen=addr, recv_timeout=3000) as rep, nng.Req0(
         dial=addr, recv_timeout=3000, resend_time=100
     ) as req:
         sent = b"hey i have a question for you"
@@ -128,8 +140,8 @@ def test_resend_time():
         assert req.recv() == response
 
 
-def test_setopt_rejects_non_integer_float():
-    with pynng.Pair0() as s:
+def test_setopt_rejects_non_integer_float(nng):
+    with nng.Pair0() as s:
         with pytest.raises(ValueError):
             s.recv_timeout = 1.5  # not an integer-like float
         # But integer-like floats should work
@@ -137,29 +149,31 @@ def test_setopt_rejects_non_integer_float():
         assert s.recv_timeout == 1
 
 
+@pytest.mark.nng_v1
 def test_sockaddr_option_is_readonly():
-    """SockAddrOption has no setter, so writing should raise TypeError."""
+    """v1-only: SockAddrOption uses nng_listener_get_addr (v1)."""
     with pynng.Pair1(recv_timeout=50, listen=tcp_addr) as s0:
         listener = s0.listeners[0]
         with pytest.raises(TypeError):
             listener.local_address = "something"
 
 
+@pytest.mark.nng_v1
 def test_pointer_option_is_writeonly():
-    """PointerOption has no getter, so reading tls_config should raise TypeError."""
+    """v1-only: tls_config option descriptor only exists on v1 sockets."""
     with pynng.Pair0() as s:
         with pytest.raises(TypeError):
             _ = s.tls_config
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="select.select() may not work with NNG fds on Windows")
-def test_recv_send_fd():
+def test_recv_send_fd(nng):
     """Test recv_fd and send_fd return valid file descriptors for polling."""
     import select
     from _test_util import wait_pipe_len
-    addr = "inproc://test-recv-send-fd"
-    with pynng.Pair0(listen=addr, recv_timeout=5000) as s0, \
-         pynng.Pair0(dial=addr) as s1:
+    addr = unique_inproc_addr()
+    with nng.Pair0(listen=addr, recv_timeout=5000) as s0, \
+         nng.Pair0(dial=addr) as s1:
         wait_pipe_len(s0, 1)
         fd = s0.recv_fd
         assert isinstance(fd, int)

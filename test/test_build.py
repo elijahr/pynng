@@ -232,7 +232,7 @@ class TestGenerateCdef:
         """The generated cdef can be parsed by a fresh FFI without error."""
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _headers = generate_cdef()
         test_ffi = __import__("cffi").FFI()
         # This will raise cffi.CDefError or cffi.FFIError if the cdef is bad
         test_ffi.cdef(cdef)
@@ -240,7 +240,7 @@ class TestGenerateCdef:
     def test_cdef_contains_core_types(self):
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _headers = generate_cdef()
         for type_name in [
             "nng_socket",
             "nng_pipe",
@@ -255,7 +255,7 @@ class TestGenerateCdef:
     def test_cdef_contains_protocol_openers(self):
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _headers = generate_cdef()
         for func in [
             "nng_pair0_open",
             "nng_req0_open",
@@ -273,7 +273,7 @@ class TestGenerateCdef:
     def test_cdef_excludes_filtered_patterns(self):
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _headers = generate_cdef()
         assert "nng_tls_config_pass" not in cdef
         assert "nng_tls_config_key" not in cdef
         # But other TLS functions should be present
@@ -282,7 +282,7 @@ class TestGenerateCdef:
     def test_cdef_contains_core_functions(self):
         from build_pynng import generate_cdef
 
-        cdef = generate_cdef()
+        cdef, _headers = generate_cdef()
         for func in ["nng_send", "nng_recv", "nng_close", "nng_aio_alloc", "nng_ctx_open"]:
             assert func in cdef, f"Missing function {func} in cdef"
 
@@ -314,7 +314,7 @@ class TestUmbrellaHeader:
 
         # The actual test: verify that generate_cdef() produces output that
         # includes declarations from across the header set, not just nng.h.
-        cdef = generate_cdef()
+        cdef, _headers = generate_cdef()
 
         # Core nng.h types
         assert "nng_socket" in cdef, "Missing nng_socket from nng/nng.h"
@@ -344,3 +344,129 @@ class TestUmbrellaHeader:
             assert "nng_tls_config_alloc" in cdef, (
                 "TLS header exists but nng_tls_config_alloc missing from cdef"
             )
+
+
+# -- v2 CFFI module tests -----------------------------------------------------
+
+
+@pytest.mark.nng_v2
+class TestV2FFICoreTypes:
+    """Verify that the v2 FFI module knows about core NNG types."""
+
+    @pytest.fixture(autouse=True)
+    def _import_v2(self):
+        v2 = pytest.importorskip("pynng._nng_v2")
+        self.ffi = v2.ffi
+        self.lib = v2.lib
+
+    @pytest.mark.parametrize(
+        "type_name",
+        [
+            "nng_socket",
+            "nng_pipe",
+            "nng_aio",
+            "nng_ctx",
+            "nng_msg",
+            "nng_dialer",
+            "nng_listener",
+        ],
+    )
+    def test_v2_ffi_knows_core_types(self, type_name):
+        self.ffi.typeof(type_name)
+
+
+@pytest.mark.nng_v2
+class TestV2FFICoreFunctions:
+    """Verify that all expected v2-specific functions exist."""
+
+    @pytest.fixture(autouse=True)
+    def _import_v2(self):
+        v2 = pytest.importorskip("pynng._nng_v2")
+        self.lib = v2.lib
+
+    @pytest.mark.parametrize(
+        "func_name",
+        [
+            "nng_init",
+            "nng_fini",
+            "nng_socket_close",
+            "nng_socket_proto_id",
+            "nng_socket_proto_name",
+            "nng_socket_peer_id",
+            "nng_socket_peer_name",
+            "nng_socket_raw",
+            "nng_socket_recv",
+            "nng_socket_send",
+            "nng_socket_get_recv_poll_fd",
+            "nng_socket_get_send_poll_fd",
+            "nng_sub0_socket_subscribe",
+            "nng_sub0_socket_unsubscribe",
+        ],
+    )
+    def test_v2_has_specific_functions(self, func_name):
+        assert hasattr(self.lib, func_name)
+
+    @pytest.mark.parametrize(
+        "func_name",
+        [
+            "nng_pair0_open",
+            "nng_pair1_open",
+            "nng_req0_open",
+            "nng_rep0_open",
+            "nng_pub0_open",
+            "nng_sub0_open",
+            "nng_push0_open",
+            "nng_pull0_open",
+            "nng_bus0_open",
+            "nng_surveyor0_open",
+            "nng_respondent0_open",
+        ],
+    )
+    def test_v2_has_protocol_openers(self, func_name):
+        assert hasattr(self.lib, func_name)
+
+    @pytest.mark.parametrize(
+        "func_name",
+        [
+            "nng_send",
+            "nng_aio_alloc",
+            "nng_ctx_open",
+            "nng_dial",
+            "nng_listen",
+            "nng_strerror",
+            "nng_msg_alloc",
+            "nng_msg_free",
+            "nng_recvmsg",
+            "nng_sendmsg",
+        ],
+    )
+    def test_v2_has_core_functions(self, func_name):
+        assert hasattr(self.lib, func_name)
+
+
+@pytest.mark.nng_v2
+class TestV2Differences:
+    """Verify expected differences between v1 and v2 CFFI modules."""
+
+    @pytest.fixture(autouse=True)
+    def _import_both(self):
+        self.v1 = pytest.importorskip("pynng._nng")
+        self.v2 = pytest.importorskip("pynng._nng_v2")
+
+    def test_v2_has_nng_init(self):
+        assert hasattr(self.v2.lib, "nng_init")
+
+    def test_v1_lacks_nng_init(self):
+        assert not hasattr(self.v1.lib, "nng_init")
+
+    def test_v2_has_socket_close(self):
+        assert hasattr(self.v2.lib, "nng_socket_close")
+
+    def test_v1_has_nng_close(self):
+        assert hasattr(self.v1.lib, "nng_close")
+
+    def test_v1_has_flag_alloc(self):
+        assert hasattr(self.v1.lib, "NNG_FLAG_ALLOC")
+
+    def test_v2_has_flag_nonblock(self):
+        assert hasattr(self.v2.lib, "NNG_FLAG_NONBLOCK")

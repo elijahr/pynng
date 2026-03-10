@@ -3,6 +3,10 @@ import pytest
 import pynng
 from pynng import Pair0, TLSConfig
 
+# All TLS tests are v1-only because v2 uses endpoint-level TLS configuration
+# (different API). v2 TLS tests should be added when the v2 TLS API is finalized.
+pytestmark = pytest.mark.nng_v1
+
 SERVER_CERT = """
 -----BEGIN CERTIFICATE-----
 MIID1jCCAr6gAwIBAgIUMq6zvsPyDm2s4dRJD3SLYmRW1BYwDQYJKoZIhvcNAQEL

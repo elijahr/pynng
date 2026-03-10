@@ -12,6 +12,11 @@ This module serves dual purposes:
 When imported as a regular Python module (e.g., by tests), only the functions
 and constants are made available. The ffibuilder setup only runs when executed
 by cffi_buildtool (which sets __name__ to "gen-cffi-src") or directly.
+
+Supports generating bindings for both nng v1 and v2. The target module is
+controlled by the NNG_MODULE_NAME environment variable:
+  - "pynng._nng" (default): v1 bindings using NNG_V1_HEADERS
+  - "pynng._nng_v2": v2 bindings using NNG_V2_HEADERS
 """
 
 import glob
@@ -24,7 +29,8 @@ import sys
 logger = logging.getLogger(__name__)
 
 
-NNG_HEADERS = [
+# v1 headers: individual protocol headers plus TLS
+NNG_V1_HEADERS = [
     "nng/nng.h",
     "nng/protocol/bus0/bus.h",
     "nng/protocol/pair0/pair.h",
@@ -41,7 +47,28 @@ NNG_HEADERS = [
     "nng/transport/tls/tls.h",
 ]
 
+# v2 consolidates all public API into a single header
+NNG_V2_HEADERS = [
+    "nng/nng.h",
+]
+
+# Keep NNG_HEADERS as alias for v1 (backward compatibility)
+NNG_HEADERS = NNG_V1_HEADERS
+
 EXCLUDE_PATTERNS = [r"nng_tls_config_(pass|key)"]
+
+# v2 has additional opaque types (forward-declared structs with no public
+# definition) that CFFI cannot handle as concrete types. Exclude them and
+# all functions that reference them. Also exclude nng_id_map and related
+# functions (internal data structure not needed by pynng).
+EXCLUDE_PATTERNS_V2 = [
+    r"nng_tls_config_(pass|key)",
+    r"nng_id_map",
+    r"nng_id_(get|set|alloc|remove|visit)",
+    r"nng_tls_cert",
+    r"nng_pipe_peer_cert",
+    r"nng_stream_peer_cert",
+]
 
 
 def _validate_nng_include_dir(path: str) -> str | None:
@@ -206,23 +233,34 @@ def _get_nng_include_dir() -> str:
     return include_dir
 
 
-def generate_cdef() -> tuple[str, list[str]]:
+def generate_cdef(headers=None, include_dir=None, exclude_patterns=None) -> tuple[str, list[str]]:
     """Parse NNG headers and generate CFFI cdef declarations.
 
-    Reads NNG_INCLUDE_DIR from the environment at call time.
+    Args:
+        headers: List of header paths relative to the include dir.
+            Defaults to NNG_V1_HEADERS.
+        include_dir: Override for NNG include directory.
+            If None, uses auto-detection (NNG_INCLUDE_DIR env var, etc.).
+        exclude_patterns: Regex patterns for symbols to exclude.
+            Defaults to EXCLUDE_PATTERNS.
 
     Returns:
         A tuple of (cdef_string, existing_headers) where existing_headers
-        is the filtered list of NNG_HEADERS that exist on disk.
+        is the filtered list of headers that exist on disk.
     """
     from headerkit.backends import get_backend
     from headerkit.writers.cffi import header_to_cffi
 
-    nng_include_dir = _get_nng_include_dir()
+    if headers is None:
+        headers = NNG_V1_HEADERS
+    if exclude_patterns is None:
+        exclude_patterns = EXCLUDE_PATTERNS
+    if include_dir is None:
+        include_dir = _get_nng_include_dir()
 
     # Build umbrella header that includes all existing NNG headers
     existing = [
-        h for h in NNG_HEADERS if os.path.exists(os.path.join(nng_include_dir, h))
+        h for h in headers if os.path.exists(os.path.join(include_dir, h))
     ]
     includes = "\n".join(f"#include <{h}>" for h in existing)
     umbrella = f"""\
@@ -237,16 +275,16 @@ def generate_cdef() -> tuple[str, list[str]]:
     header = backend.parse(
         umbrella,
         "umbrella.h",
-        include_dirs=[nng_include_dir],
-        project_prefixes=(nng_include_dir,),
+        include_dirs=[include_dir],
+        project_prefixes=(include_dir,),
     )
 
     # Convert IR to CFFI cdef string
-    cdef = header_to_cffi(header, exclude_patterns=EXCLUDE_PATTERNS)
+    cdef = header_to_cffi(header, exclude_patterns=exclude_patterns)
 
     # Extract additional #define constants from nng.h via regex
     # (libclang can miss macro values that involve expressions)
-    nng_h_path = os.path.join(nng_include_dir, "nng/nng.h")
+    nng_h_path = os.path.join(include_dir, "nng/nng.h")
     extra_defines = _extract_defines(nng_h_path)
     if extra_defines:
         cdef = cdef + "\n" + extra_defines
@@ -271,18 +309,40 @@ def _extract_defines(nng_h_path: str) -> str:
     return "\n".join(defines)
 
 
-def _build_ffi():
+def _build_ffi(module_name="pynng._nng", headers=None, exclude_patterns=None):
     """Set up the CFFI ffibuilder for use by cffi_buildtool.
+
+    Args:
+        module_name: CFFI module name. "pynng._nng" for v1, "pynng._nng_v2" for v2.
+        headers: Header list to parse. Defaults based on module_name.
+        exclude_patterns: Regex patterns for symbols to exclude.
+            Defaults based on module_name.
 
     This is called at module level only during builds (cffi_buildtool or
     direct execution), never when imported by tests.
     """
     from cffi import FFI
 
+    # Default headers and exclude patterns based on module name
+    if headers is None:
+        if module_name == "pynng._nng_v2":
+            headers = NNG_V2_HEADERS
+        else:
+            headers = NNG_V1_HEADERS
+    if exclude_patterns is None:
+        if module_name == "pynng._nng_v2":
+            exclude_patterns = EXCLUDE_PATTERNS_V2
+        else:
+            exclude_patterns = EXCLUDE_PATTERNS
+
     nng_include_dir = _get_nng_include_dir()
 
     # Generate cdef content and get the list of existing headers
-    cdef_content, existing_headers = generate_cdef()
+    cdef_content, existing_headers = generate_cdef(
+        headers=headers,
+        include_dir=nng_include_dir,
+        exclude_patterns=exclude_patterns,
+    )
 
     callbacks = """
         extern "Python" void _async_complete(void *);
@@ -295,7 +355,7 @@ def _build_ffi():
     source_includes = "\n".join(f"        #include <{h}>" for h in existing_headers)
 
     ffi.set_source(
-        "pynng._nng",
+        module_name,
         f"""
             #define NNG_DECL
             #define NNG_STATIC_LIB
@@ -312,7 +372,10 @@ def _build_ffi():
 # "gen-cffi-src") or when run directly as a script. When imported normally
 # by tests (__name__ == "build_pynng"), skip the build setup.
 if __name__ in ("gen-cffi-src", "__main__"):
-    ffibuilder = _build_ffi()
+    # Check NNG_MODULE_NAME env var to determine which module to build.
+    # Default is v1 ("pynng._nng").
+    _module_name = os.environ.get("NNG_MODULE_NAME", "pynng._nng")
+    ffibuilder = _build_ffi(module_name=_module_name)
 
     if __name__ == "__main__":
         ffibuilder.compile(verbose=True)
