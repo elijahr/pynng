@@ -15,14 +15,15 @@ addr = "inproc://test-addr"
 
 
 def test_pipe_gets_added_and_removed():
-    with pynng.Pair0(listen=addr) as s0, pynng.Pair0() as s1:
-        assert len(s0.pipes) == 0
-        assert len(s1.pipes) == 0
-        s1.dial(addr)
-        wait_pipe_len(s0, 1)
-        wait_pipe_len(s1, 1)
-    wait_pipe_len(s0, 0)
-    wait_pipe_len(s1, 0)
+    with pynng.Pair0(listen=addr) as s0:
+        with pynng.Pair0() as s1:
+            assert len(s0.pipes) == 0
+            assert len(s1.pipes) == 0
+            s1.dial(addr)
+            wait_pipe_len(s0, 1)
+            wait_pipe_len(s1, 1)
+        # s1 closed; wait for s0 to see the pipe removed while s0 is still alive
+        wait_pipe_len(s0, 0)
 
 
 def test_close_pipe_works():
