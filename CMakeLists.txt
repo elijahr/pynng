@@ -291,6 +291,10 @@ if(BUILD_NNG_V2)
   # Build nng v2 in a completely isolated build tree via ExternalProject_Add.
   # This avoids CMake target name collision with v1 (both define a target "nng").
   # We pass MBEDTLS_ROOT so v2's find_package(MbedTLS) finds our staged copy.
+  #
+  # _MBEDTLS_V2_OR_NEWER is pre-cached to bypass FindMbedTLS.cmake's
+  # check_symbol_exists(mbedtls_ssl_init) which fails when linking static
+  # mbedTLS without -lpthread. We know mbedTLS 3.x has this symbol.
   ExternalProject_Add(nng_v2_build
     SOURCE_DIR ${nng_v2_SOURCE_DIR}
     DEPENDS mbedtls_stage
@@ -305,6 +309,10 @@ if(BUILD_NNG_V2)
       -DNNG_ENABLE_NNGCAT=OFF
       -DBUILD_SHARED_LIBS=OFF
       -DMBEDTLS_ROOT=${MBEDTLS_STAGE_DIR}
+      -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+      -DCMAKE_RANLIB=${CMAKE_RANLIB}
+    CMAKE_CACHE_ARGS
+      -D_MBEDTLS_V2_OR_NEWER:INTERNAL=TRUE
     BUILD_BYPRODUCTS ${NNG_V2_STATIC_LIB}
   )
 
@@ -313,9 +321,15 @@ if(BUILD_NNG_V2)
   set(NNG_V2_INSTALL_DIR ${INSTALL_DIR})
 
   add_library(nng_v2_imported STATIC IMPORTED)
-  set_target_properties(nng_v2_imported PROPERTIES
-    IMPORTED_LOCATION "${NNG_V2_INSTALL_DIR}/lib/libnng.a"
-  )
+  if(WIN32)
+    set_target_properties(nng_v2_imported PROPERTIES
+      IMPORTED_LOCATION "${NNG_V2_INSTALL_DIR}/lib/nng.lib"
+    )
+  else()
+    set_target_properties(nng_v2_imported PROPERTIES
+      IMPORTED_LOCATION "${NNG_V2_INSTALL_DIR}/lib/libnng.a"
+    )
+  endif()
   # Interface include dirs must exist at configure time for INTERFACE_INCLUDE_DIRECTORIES;
   # create the directory so CMake doesn't complain.
   file(MAKE_DIRECTORY "${NNG_V2_INSTALL_DIR}/include")
