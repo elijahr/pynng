@@ -144,9 +144,10 @@ def test_tls_auth_mode():
     config.set_auth_mode(TLSConfig.AUTH_MODE_REQUIRED)
     # NNG has no getter for auth_mode, so we verify set_auth_mode
     # does not raise for valid modes (it calls check_err internally).
-    # Invalid auth mode: negative values cause OverflowError at CFFI level
-    # (unsigned int), large positive values cause NNGException from NNG
-    with pytest.raises(OverflowError):
+    # Invalid auth mode: negative values cause OverflowError on Linux/macOS
+    # (CFFI rejects negative for unsigned int) but on Windows CFFI wraps the
+    # value and NNG returns EINVAL, raising NNGException instead.
+    with pytest.raises((OverflowError, pynng.NNGException)):
         config.set_auth_mode(-999)
     with pytest.raises(pynng.NNGException):
         config.set_auth_mode(9999)
