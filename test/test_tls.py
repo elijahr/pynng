@@ -5,7 +5,7 @@ from pynng import Pair0, TLSConfig
 
 # All TLS tests are v1-only because v2 uses endpoint-level TLS configuration
 # (different API). v2 TLS tests should be added when the v2 TLS API is finalized.
-pytestmark = [pytest.mark.nng_v1, pytest.mark.requires_tls]
+pytestmark = [pytest.mark.nng_v1]
 
 SERVER_CERT = """
 -----BEGIN CERTIFICATE-----
@@ -70,6 +70,7 @@ URL = "tls+tcp://localhost:5556"
 BYTES = b"1234567890"
 
 
+@pytest.mark.requires_tls
 def test_config_string():
     with Pair0(recv_timeout=1000, send_timeout=1000) as server, Pair0(
         recv_timeout=1000, send_timeout=1000
@@ -92,6 +93,7 @@ def test_config_string():
         assert client.recv() == BYTES
 
 
+@pytest.mark.requires_tls
 def test_config_file(tmp_path):
     ca_crt_file = tmp_path / "ca.crt"
     ca_crt_file.write_text(CA_CERT)
@@ -137,6 +139,7 @@ def test_tls_config_own_cert_both_required():
         TLSConfig(TLSConfig.MODE_SERVER, own_key_string="key")
 
 
+@pytest.mark.requires_tls
 def test_tls_auth_mode():
     config = TLSConfig(TLSConfig.MODE_CLIENT)
     config.set_auth_mode(TLSConfig.AUTH_MODE_NONE)
@@ -153,6 +156,7 @@ def test_tls_auth_mode():
         config.set_auth_mode(9999)
 
 
+@pytest.mark.requires_tls
 def test_tls_auth_mode_in_constructor():
     # AUTH_MODE_NONE has value 0; tests the "if auth_mode is not None:" fix
     for mode in (TLSConfig.AUTH_MODE_NONE, TLSConfig.AUTH_MODE_OPTIONAL, TLSConfig.AUTH_MODE_REQUIRED):

@@ -145,6 +145,13 @@ if(PYNNG_TLS_ENGINE STREQUAL "wolf")
   set(WOLFSSL_ALPN ON CACHE BOOL "Enable ALPN" FORCE)
   set(WOLFSSL_TLS13 ON CACHE BOOL "Enable TLS 1.3" FORCE)
   set(WOLFSSL_HARDEN ON CACHE BOOL "Enable hardening" FORCE)
+  # Disable stringop-overflow warning-as-error for wolfSSL. wolfSSL adds
+  # -Werror to CMAKE_C_FLAGS, and GCC >= 12 triggers false positives for
+  # stringop-overflow in wolfSSL's tls.c.
+  set(_SAVED_CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+  if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=stringop-overflow")
+  endif()
 
   FetchContent_Declare(
     wolfssl
@@ -154,10 +161,26 @@ if(PYNNG_TLS_ENGINE STREQUAL "wolf")
   )
   FetchContent_MakeAvailable(wolfssl)
 
+  # Restore original C flags so they don't leak to other targets
+  set(CMAKE_C_FLAGS "${_SAVED_CMAKE_C_FLAGS}")
+
   # Disable installation for wolfSSL targets
   if(TARGET wolfssl)
     set_target_properties(wolfssl PROPERTIES EXCLUDE_FROM_ALL TRUE)
   endif()
+
+  # Pre-set wolfSSL feature detection results for nng v1.
+  # nng's wolfssl CMakeLists.txt calls check_library_exists(wolfssl::wolfssl ...)
+  # which uses try_compile — this fails because the wolfssl::wolfssl target
+  # (from find_package) doesn't exist; we have a plain wolfssl target from
+  # FetchContent instead. Setting these cache variables (matching the type and
+  # value check_library_exists would produce) causes the macro to skip the check.
+  set(NNG_WOLFSSL_HAVE_CRL 1 CACHE INTERNAL "Have library wolfssl")
+  set(NNG_WOLFSSL_HAVE_VERIFY 1 CACHE INTERNAL "Have library wolfssl")
+  set(NNG_WOLFSSL_HAVE_PASSWORD 1 CACHE INTERNAL "Have library wolfssl")
+  set(NNG_WOLFSSL_HAVE_PEER_CERT 1 CACHE INTERNAL "Have library wolfssl")
+  set(NNG_WOLFSSL_HAVE_DH 1 CACHE INTERNAL "Have library wolfssl")
+  set(NNG_WOLFSSL_HAVE_PSK 1 CACHE INTERNAL "Have library wolfssl")
 
   set(_TLS_LINK_LIBS wolfssl)
 endif()
@@ -254,11 +277,20 @@ FetchContent_MakeAvailable(nng)
 # Define where the generated C file will be placed
 set(CFFI_OUTPUT_FILE "${CMAKE_CURRENT_BINARY_DIR}/_nng.c")
 
+# Convert TLS enabled booleans to 0/1 for Python env var
+if(_V1_TLS_ENABLED)
+  set(_V1_TLS_ENABLED_INT "1")
+else()
+  set(_V1_TLS_ENABLED_INT "0")
+endif()
+
 # Create a custom command to generate the CFFI bindings
 add_custom_command(
   OUTPUT ${CFFI_OUTPUT_FILE}
   COMMAND ${CMAKE_COMMAND} -E echo "Generating CFFI bindings for NNG v1..."
-  COMMAND ${CMAKE_COMMAND} -E env "NNG_INCLUDE_DIR=${nng_SOURCE_DIR}/include"
+  COMMAND ${CMAKE_COMMAND} -E env
+    "NNG_INCLUDE_DIR=${nng_SOURCE_DIR}/include"
+    "PYNNG_TLS_ENABLED=${_V1_TLS_ENABLED_INT}"
     ${Python_EXECUTABLE} -m cffi_buildtool exec-python ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py ${CFFI_OUTPUT_FILE} --ffi-var=ffibuilder
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py
@@ -470,6 +502,13 @@ if(BUILD_NNG_V2)
 
   set(CFFI_V2_OUTPUT_FILE "${CMAKE_CURRENT_BINARY_DIR}/_nng_v2.c")
 
+  # Convert v2 TLS enabled boolean to 0/1 for Python env var
+  if(_V2_TLS_ENABLED)
+    set(_V2_TLS_ENABLED_INT "1")
+  else()
+    set(_V2_TLS_ENABLED_INT "0")
+  endif()
+
   # The v2 CFFI generation depends on the v2 build completing (so headers are installed).
   add_custom_command(
     OUTPUT ${CFFI_V2_OUTPUT_FILE}
@@ -477,6 +516,7 @@ if(BUILD_NNG_V2)
     COMMAND ${CMAKE_COMMAND} -E env
       "NNG_INCLUDE_DIR=${NNG_V2_INSTALL_DIR}/include"
       "NNG_MODULE_NAME=pynng._nng_v2"
+      "PYNNG_TLS_ENABLED=${_V2_TLS_ENABLED_INT}"
       ${Python_EXECUTABLE} -m cffi_buildtool exec-python ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py ${CFFI_V2_OUTPUT_FILE} --ffi-var=ffibuilder
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py nng_v2_build
