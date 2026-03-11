@@ -1,4 +1,4 @@
-# Check for new NNG releases
+# Check for new NNG releases (v1 stable + v2 pre-releases)
 #
 # Runs daily to check for new NNG versions.
 # Creates a GitHub issue if a new version is found that we haven't tested against.
@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  check-v1:
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -26,40 +26,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get current NNG version
+      - name: Get current NNG v1 version
         id: current
         run: |
-          # Extract NNG_REV from CMakeLists.txt
           current_rev=$(grep 'set(NNG_REV ' CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
           echo "current_rev=$current_rev" >> $GITHUB_OUTPUT
-          echo "Current NNG revision: $current_rev"
+          echo "Current NNG v1 revision: $current_rev"
 
-      - name: Check for new NNG releases
+      - name: Check for new NNG v1 releases
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Get latest NNG release tag from upstream
-          latest=$(git ls-remote --tags --sort='-version:refname' https://github.com/nanomsg/nng 'v*' | head -1 | sed 's/.*refs\/tags\///')
+          # Get latest stable v1 tag (v1.x.y, exclude v2 and pre-releases)
+          latest=$(git ls-remote --tags --sort='-version:refname' https://github.com/nanomsg/nng 'v1*' \
+            | grep -v '\^{}' | head -1 | sed 's/.*refs\/tags\///')
           echo "latest_tag=$latest" >> $GITHUB_OUTPUT
-          echo "Latest upstream NNG tag: $latest"
+          echo "Latest upstream NNG v1 tag: $latest"
 
-          # Also get latest from elijahr fork
-          fork_latest=$(git ls-remote --tags --sort='-version:refname' https://github.com/elijahr/nng 'v*' | head -1 | sed 's/.*refs\/tags\///')
-          echo "fork_latest_tag=$fork_latest" >> $GITHUB_OUTPUT
-          echo "Latest fork NNG tag: $fork_latest"
-
-          # Check if we're tracking a branch or tag
           current_rev="${{ steps.current.outputs.current_rev }}"
-          echo "We are tracking: $current_rev"
+          if [ "$latest" = "$current_rev" ]; then
+            echo "update_available=false" >> $GITHUB_OUTPUT
+            echo "Already on latest v1"
+          else
+            echo "update_available=true" >> $GITHUB_OUTPUT
+            echo "Update available: $current_rev -> $latest"
+          fi
 
-          # Known upstream tag we've last evaluated. Update this when
-          # bumping NNG to acknowledge the new release.
-          KNOWN_UPSTREAM_TAG="v1.9.0"
-          echo "known_upstream_tag=$KNOWN_UPSTREAM_TAG" >> $GITHUB_OUTPUT
-
-      - name: Try building against latest upstream
+      - name: Try building against latest v1
         id: build
+        if: steps.check.outputs.update_available == 'true'
         continue-on-error: true
         run: |
           sudo apt-get update && sudo apt-get install -y ninja-build libclang-dev python3-dev
@@ -67,12 +63,9 @@ jobs:
 
           set -o pipefail
 
-          # Try build with latest upstream NNG
           latest_tag="${{ steps.check.outputs.latest_tag }}"
-          echo "Testing build against upstream NNG $latest_tag..."
+          echo "Testing build against NNG v1 $latest_tag..."
 
-          # Temporarily modify CMakeLists.txt to point to upstream
-          sed -i "s|set(NNG_REPO .*|set(NNG_REPO \"https://github.com/nanomsg/nng\" CACHE STRING \"URL of the NNG repository\")|" CMakeLists.txt
           sed -i "s|set(NNG_REV .*|set(NNG_REV \"$latest_tag\" CACHE STRING \"Revision of NNG to use\")|" CMakeLists.txt
 
           uv pip install --system -v -e '.[dev]' 2>&1 | tail -50
@@ -80,7 +73,6 @@ jobs:
 
           if [ $build_result -eq 0 ]; then
             echo "build_status=success" >> $GITHUB_OUTPUT
-            # Run tests
             uv run --no-project pytest -v test 2>&1 | tail -50
             test_result=$?
             if [ $test_result -eq 0 ]; then
@@ -93,51 +85,152 @@ jobs:
             echo "test_status=skipped" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create or update issue
-        if: steps.check.outcome == 'success'
+      - name: Create issue for v1 update
+        if: steps.check.outputs.update_available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_REV: ${{ steps.current.outputs.current_rev }}
           LATEST_TAG: ${{ steps.check.outputs.latest_tag }}
-          FORK_LATEST: ${{ steps.check.outputs.fork_latest_tag }}
-          BUILD_STATUS: ${{ steps.build.outputs.build_status }}
-          TEST_STATUS: ${{ steps.build.outputs.test_status }}
+          BUILD_STATUS: ${{ steps.build.outputs.build_status || 'skipped' }}
+          TEST_STATUS: ${{ steps.build.outputs.test_status || 'skipped' }}
         run: |
-          title="NNG update available: $LATEST_TAG"
+          title="NNG v1 update available: $LATEST_TAG"
 
-          # Check if issue already exists
           existing=$(gh issue list --state open --search "$title" --json number,title --jq ".[] | select(.title == \"$title\") | .number")
           if [ -n "$existing" ]; then
             echo "Issue #$existing already open, skipping"
             exit 0
           fi
 
-          # Only create issue if upstream has released a new version
-          KNOWN_UPSTREAM_TAG="${{ steps.check.outputs.known_upstream_tag }}"
-          if [ "$LATEST_TAG" = "$KNOWN_UPSTREAM_TAG" ]; then
-            echo "No new upstream release (latest: $LATEST_TAG, known: $KNOWN_UPSTREAM_TAG)"
-            exit 0
-          fi
-
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           body=$(cat <<EOF
-          A new NNG version is available upstream.
+          A new NNG v1 version is available upstream.
 
           ## Version Info
-          - **Current tracking:** \`$CURRENT_REV\`
-          - **Latest upstream tag:** \`$LATEST_TAG\`
-          - **Latest fork tag:** \`$FORK_LATEST\`
+          - **Current:** \`$CURRENT_REV\`
+          - **Latest:** \`$LATEST_TAG\`
 
           ## Build Test Results
           - **Build:** $BUILD_STATUS
           - **Tests:** $TEST_STATUS
 
           ## Action Required
-          1. Review [NNG changelog](https://github.com/nanomsg/nng/releases/tag/$LATEST_TAG)
-          2. Update fork if needed: \`https://github.com/elijahr/nng\`
-          3. Update \`NNG_REV\` in \`CMakeLists.txt\`
-          4. Run full test suite
+          1. Review [NNG v1 changelog](https://github.com/nanomsg/nng/releases/tag/$LATEST_TAG)
+          2. Update \`NNG_REV\` in \`CMakeLists.txt\`
+          3. Run full test suite
+
+          **Workflow run:** $run_url
+          EOF
+          )
+
+          gh issue create --title "$title" --body "$body" --label "dependencies"
+
+  check-v2:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get current NNG v2 version
+        id: current
+        run: |
+          current_rev=$(grep 'set(NNG_V2_REV ' CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
+          echo "current_rev=$current_rev" >> $GITHUB_OUTPUT
+          echo "Current NNG v2 revision: $current_rev"
+
+      - name: Check for new NNG v2 releases
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get latest v2 tag (including pre-releases/alphas)
+          latest=$(git ls-remote --tags --sort='-version:refname' https://github.com/nanomsg/nng 'v2*' \
+            | grep -v '\^{}' | head -1 | sed 's/.*refs\/tags\///')
+          echo "latest_tag=$latest" >> $GITHUB_OUTPUT
+          echo "Latest upstream NNG v2 tag: $latest"
+
+          current_rev="${{ steps.current.outputs.current_rev }}"
+          if [ "$latest" = "$current_rev" ]; then
+            echo "update_available=false" >> $GITHUB_OUTPUT
+            echo "Already on latest v2"
+          else
+            echo "update_available=true" >> $GITHUB_OUTPUT
+            echo "Update available: $current_rev -> $latest"
+          fi
+
+      - name: Try building against latest v2
+        id: build
+        if: steps.check.outputs.update_available == 'true'
+        continue-on-error: true
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build libclang-dev python3-dev
+          pip install uv
+
+          set -o pipefail
+
+          latest_tag="${{ steps.check.outputs.latest_tag }}"
+          echo "Testing build against NNG v2 $latest_tag..."
+
+          sed -i "s|set(NNG_V2_REV .*|set(NNG_V2_REV \"$latest_tag\" CACHE STRING \"Revision of NNG v2 to use\")|" CMakeLists.txt
+
+          uv pip install --system -v -e '.[dev]' 2>&1 | tail -50
+          build_result=$?
+
+          if [ $build_result -eq 0 ]; then
+            echo "build_status=success" >> $GITHUB_OUTPUT
+            uv run --no-project pytest -v test 2>&1 | tail -50
+            test_result=$?
+            if [ $test_result -eq 0 ]; then
+              echo "test_status=success" >> $GITHUB_OUTPUT
+            else
+              echo "test_status=failure" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "build_status=failure" >> $GITHUB_OUTPUT
+            echo "test_status=skipped" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create issue for v2 update
+        if: steps.check.outputs.update_available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_REV: ${{ steps.current.outputs.current_rev }}
+          LATEST_TAG: ${{ steps.check.outputs.latest_tag }}
+          BUILD_STATUS: ${{ steps.build.outputs.build_status || 'skipped' }}
+          TEST_STATUS: ${{ steps.build.outputs.test_status || 'skipped' }}
+        run: |
+          title="NNG v2 update available: $LATEST_TAG"
+
+          existing=$(gh issue list --state open --search "$title" --json number,title --jq ".[] | select(.title == \"$title\") | .number")
+          if [ -n "$existing" ]; then
+            echo "Issue #$existing already open, skipping"
+            exit 0
+          fi
+
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          body=$(cat <<EOF
+          A new NNG v2 pre-release is available upstream.
+
+          ## Version Info
+          - **Current:** \`$CURRENT_REV\`
+          - **Latest:** \`$LATEST_TAG\`
+
+          ## Build Test Results
+          - **Build:** $BUILD_STATUS
+          - **Tests:** $TEST_STATUS
+
+          ## Action Required
+          1. Review [NNG v2 changelog](https://github.com/nanomsg/nng/releases/tag/$LATEST_TAG)
+          2. Update \`NNG_V2_REV\` in \`CMakeLists.txt\`
+          3. Check for API changes (v2 is alpha, breaking changes expected)
+          4. Update \`EXCLUDE_PATTERNS_V2\` in \`build_pynng.py\` if needed
+          5. Run full test suite
+
+          > **Note:** NNG v2 is in alpha. Breaking API changes are expected between releases.
 
           **Workflow run:** $run_url
           EOF
