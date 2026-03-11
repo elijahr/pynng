@@ -73,6 +73,7 @@ EXCLUDE_PATTERNS_V2 = [
     r"nng_stream_peer_cert",
     # Functions declared in v2 headers but not implemented in the library.
     # These cause LNK2019 on Windows (MSVC requires all symbols resolved).
+    r"nng_tls_config_(pass|key)",  # raw key/passphrase not implemented in v2 either
     r"nng_ctx_set$",              # nng_ctx_set (generic) removed; typed variants remain
     r"nng_dialer_get_addr$",      # removed; nng_dialer_set_addr still exists
     r"_uint64$",                  # uint64 typed accessors not implemented in v2
