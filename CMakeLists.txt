@@ -145,6 +145,9 @@ if(PYNNG_TLS_ENGINE STREQUAL "wolf")
   set(WOLFSSL_ALPN ON CACHE BOOL "Enable ALPN" FORCE)
   set(WOLFSSL_TLS13 ON CACHE BOOL "Enable TLS 1.3" FORCE)
   set(WOLFSSL_HARDEN ON CACHE BOOL "Enable hardening" FORCE)
+  # Features required by nng's wolfSSL TLS engine:
+  set(WOLFSSL_CRL "yes" CACHE STRING "Enable CRL support" FORCE)
+  set(WOLFSSL_OPENSSLEXTRA "yes" CACHE STRING "Enable OpenSSL compat layer" FORCE)
   # Disable stringop-overflow warning-as-error for wolfSSL. wolfSSL adds
   # -Werror to CMAKE_C_FLAGS, and GCC >= 12 triggers false positives for
   # stringop-overflow in wolfSSL's tls.c.
