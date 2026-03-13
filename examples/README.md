@@ -6,8 +6,7 @@ This directory contains examples on using pynng for different tasks.
 * Pair (Two Way Radio) [`pair0.py`](./pair0.py):
    Demonstrates the basic bi-directional connection, pair0.
    Adapted from [nng pair example](https://nanomsg.org/gettingstarted/nng/pair.html).
-* Polyamorous pair1 connection :
-   - [`pair1_async.py`](./pair1_async.py): Demonstrates using trio.
+* Polyamorous pair1 connection ([`pair1_async.py`](./pair1_async.py)): Demonstrates using trio.
 * Pipeline (A One-Way Pipe) :
    [`pipeline.py`](./pipeline.py): Push/Pull adapted from [nng example](https://nanomsg.org/gettingstarted/nng/pipeline.html)
 * Request/Reply (I ask, you answer) :
