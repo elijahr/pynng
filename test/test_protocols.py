@@ -31,13 +31,15 @@ def test_bus():
 
 
 def test_context_manager_works():
-    # we have to grab a reference to the sockets so garbage collection doesn't
-    # close the socket for us automatically.
-    with pynng.Pair0(listen=addr) as s0:  # noqa
-        pass
-    # we should be able to do it again if the context manager worked
-    with pynng.Pair0(listen=addr) as s1:  # noqa
-        pass
+    # Verify the socket is usable inside the context manager
+    s0 = pynng.Pair0(listen=addr)
+    assert len(s0.listeners) == 1
+    s0.__exit__(None, None, None)
+    # Verify the socket was closed and resources released
+    assert len(s0.listeners) == 0
+    # We should be able to reuse the address if cleanup happened
+    with pynng.Pair0(listen=addr) as s1:
+        assert len(s1.listeners) == 1
 
 
 def test_pair0():
@@ -105,18 +107,16 @@ def test_pubsub0():
 
 
 def test_push_pull():
-    received = {"pull1": False, "pull2": False}
+    received = {"pull1": None, "pull2": None}
     with pynng.Push0(listen=addr) as push, pynng.Pull0(
         dial=addr, recv_timeout=1000
     ) as pull1, pynng.Pull0(dial=addr, recv_timeout=1000) as pull2:
 
         def recv1():
-            pull1.recv()
-            received["pull1"] = True
+            received["pull1"] = pull1.recv()
 
         def recv2():
-            pull2.recv()
-            received["pull2"] = True
+            received["pull2"] = pull2.recv()
 
         # push/pull does round robin style distribution
         t1 = threading.Thread(target=recv1, daemon=True)
@@ -126,14 +126,15 @@ def test_push_pull():
         t2.start()
         wait_pipe_len(push, 2)
         wait_pipe_len(pull1, 1)
-        wait_pipe_len(pull1, 1)
+        wait_pipe_len(pull2, 1)
 
-        push.send(b"somewhere someone should see this")
-        push.send(b"somewhereeeee")
+        push.send(b"message one")
+        push.send(b"message two")
         t1.join()
         t2.join()
-        assert received["pull1"]
-        assert received["pull2"]
+        # Verify actual data received, not just boolean flags
+        all_received = {received["pull1"], received["pull2"]}
+        assert all_received == {b"message one", b"message two"}
 
 
 def test_surveyor_respondent():
@@ -163,8 +164,9 @@ def test_surveyor_respondent():
         """
         resp2.send(msg2)
         resp = [surveyor.recv() for _ in range(2)]
-        assert b"not too bad I suppose" in resp
-        assert msg2 in resp
+        assert set(resp) == {b"not too bad I suppose", msg2}, (
+            "Unexpected survey responses: {}".format(resp)
+        )
 
         with pytest.raises(pynng.BadState):
             resp2.send(b"oadsfji")
@@ -186,12 +188,63 @@ def test_cannot_instantiate_socket_without_opener():
 
 
 def test_can_instantiate_socket_with_raw_opener():
-    with pynng.Socket(opener=pynng.lib.nng_sub0_open_raw):
-        pass
+    with pynng.Socket(opener=pynng.lib.nng_sub0_open_raw) as s:
+        assert s.raw is True
+        assert s.protocol_name == "sub"
 
 
 def test_can_pass_addr_as_bytes_or_str():
-    with pynng.Pair0(listen=b"tcp://127.0.0.1:42421"), pynng.Pair0(
-        dial="tcp://127.0.0.1:42421"
-    ):
-        pass
+    with pynng.Pair0(
+        listen=b"tcp://127.0.0.1:0", recv_timeout=1000
+    ) as s0:
+        actual_addr = "tcp://{}".format(s0.listeners[0].local_address)
+        with pynng.Pair0(
+            dial=actual_addr, recv_timeout=1000
+        ) as s1:
+            wait_pipe_len(s0, 1)
+            s1.send(b"hello from str dial")
+            assert s0.recv() == b"hello from str dial"
+
+
+@pytest.mark.parametrize("socket_cls,expected_name,expected_peer", [
+    (pynng.Pair0, "pair", "pair"),
+    (pynng.Pub0, "pub", "sub"),
+    (pynng.Sub0, "sub", "pub"),
+    (pynng.Req0, "req", "rep"),
+    (pynng.Rep0, "rep", "req"),
+    (pynng.Push0, "push", "pull"),
+    (pynng.Pull0, "pull", "push"),
+    (pynng.Bus0, "bus", "bus"),
+    (pynng.Surveyor0, "surveyor", "respondent"),
+    (pynng.Respondent0, "respondent", "surveyor"),
+])
+def test_socket_protocol_properties(socket_cls, expected_name, expected_peer):
+    """Test that socket protocol properties return correct values."""
+    with socket_cls() as s:
+        assert s.protocol_name == expected_name
+        assert s.peer_name == expected_peer
+        assert isinstance(s.protocol, int)
+        assert s.protocol > 0
+        assert isinstance(s.peer, int)
+        assert s.peer > 0
+        if expected_name == expected_peer:
+            # Self-peering protocols (pair, bus) have the same protocol
+            # and peer IDs
+            assert s.protocol == s.peer, (
+                f"{expected_name}: expected protocol == peer, "
+                f"got {s.protocol} != {s.peer}"
+            )
+        else:
+            # Asymmetric protocols (req/rep, pub/sub, etc.) must have
+            # distinct protocol and peer IDs
+            assert s.protocol != s.peer, (
+                f"{expected_name}: expected protocol != peer, "
+                f"got {s.protocol} == {s.peer}"
+            )
+
+
+def test_buffer_size_options():
+    """Test that recv_buffer_size and send_buffer_size can be set and read back."""
+    with pynng.Pair0(recv_buffer_size=4, send_buffer_size=8) as s:
+        assert s.recv_buffer_size == 4
+        assert s.send_buffer_size == 8
