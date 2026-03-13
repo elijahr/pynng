@@ -21,9 +21,14 @@ copyright = "2018 - 2026 Cody Piersall"
 author = "Cody Piersall"
 
 # The short X.Y version
-version = ""
-# The full version, including alpha/beta/rc tags
-release = ""
+try:
+    from importlib.metadata import version as _get_version
+
+    version = _get_version("pynng")
+    release = version
+except Exception:
+    version = ""
+    release = ""
 
 
 # -- General configuration ---------------------------------------------------
