@@ -1126,12 +1126,14 @@ class Dialer:
         return self
 
     async def __aexit__(self, *exc_info):
-        self.close()
+        if self.id in self.socket._dialers:
+            self.close()
 
     async def aclose(self):
         """Asynchronous close. Delegates to the synchronous :meth:`close`
         since the underlying NNG close operation is non-blocking."""
-        self.close()
+        if self.id in self.socket._dialers:
+            self.close()
 
 
 class Listener:
@@ -1194,12 +1196,14 @@ class Listener:
         return self
 
     async def __aexit__(self, *exc_info):
-        self.close()
+        if self.id in self.socket._listeners:
+            self.close()
 
     async def aclose(self):
         """Asynchronous close. Delegates to the synchronous :meth:`close`
         since the underlying NNG close operation is non-blocking."""
-        self.close()
+        if self.id in self.socket._listeners:
+            self.close()
 
 
 class Context:
