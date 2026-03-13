@@ -134,13 +134,13 @@ def _detect_homebrew() -> str | None:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         logger.debug("brew command not available or timed out")
 
-    # Fallback: check common Homebrew prefix paths directly
-    for prefix in ["/opt/homebrew", "/usr/local"]:
-        include_path = os.path.join(prefix, "include")
-        result = _validate_nng_include_dir(include_path)
-        if result:
-            logger.debug("NNG headers found in Homebrew prefix: %s", result)
-            return result
+    # Fallback: check Homebrew prefix path directly
+    # Note: /usr/local/include is already checked by _detect_system_paths()
+    include_path = os.path.join("/opt/homebrew", "include")
+    result = _validate_nng_include_dir(include_path)
+    if result:
+        logger.debug("NNG headers found in Homebrew prefix: %s", result)
+        return result
     return None
 
 
