@@ -17,8 +17,6 @@ import trio
 import pynng
 from pynng import _aio
 
-from conftest import random_addr, FAST_TIMEOUT, MEDIUM_TIMEOUT, SLOW_TIMEOUT
-
 
 # ---------------------------------------------------------------------------
 # Socket: async for
@@ -27,16 +25,16 @@ from conftest import random_addr, FAST_TIMEOUT, MEDIUM_TIMEOUT, SLOW_TIMEOUT
 @pytest.mark.trio
 async def test_socket_async_for_trio():
     """async for on a socket receives messages until socket is closed."""
-    addr = random_addr()
+    addr = "inproc://test-socket-aiter-trio"
     received = []
 
-    listener = pynng.Push0(listen=addr, send_timeout=MEDIUM_TIMEOUT)
-    puller = pynng.Pull0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+    listener = pynng.Push0(listen=addr, send_timeout=2000)
+    puller = pynng.Pull0(dial=addr, recv_timeout=2000)
     try:
         async with trio.open_nursery() as nursery:
             async def send_messages():
                 for i in range(3):
-                    await listener.asend(f"msg{i}".encode())
+                    await listener.asend("msg{}".format(i).encode())
                 # Close after sending all messages with a small delay
                 # to ensure the puller has time to receive
                 await trio.sleep(0.05)
@@ -59,15 +57,15 @@ async def test_socket_async_for_trio():
 @pytest.mark.asyncio
 async def test_socket_async_for_asyncio():
     """async for on a socket receives messages with asyncio backend."""
-    addr = random_addr()
+    addr = "inproc://test-socket-aiter-asyncio"
     received = []
 
-    listener = pynng.Push0(listen=addr, send_timeout=MEDIUM_TIMEOUT)
-    puller = pynng.Pull0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+    listener = pynng.Push0(listen=addr, send_timeout=2000)
+    puller = pynng.Pull0(dial=addr, recv_timeout=2000)
     try:
         async def send_messages():
             for i in range(3):
-                await listener.asend(f"msg{i}".encode())
+                await listener.asend("msg{}".format(i).encode())
             await asyncio.sleep(0.05)
             puller.close()
 
@@ -90,11 +88,11 @@ async def test_socket_async_for_asyncio():
 @pytest.mark.trio
 async def test_socket_async_for_stops_on_close_trio():
     """async for stops cleanly when socket is closed externally."""
-    addr = random_addr()
+    addr = "inproc://test-socket-aiter-close-trio"
     received = []
 
-    pusher = pynng.Push0(listen=addr, send_timeout=MEDIUM_TIMEOUT)
-    puller = pynng.Pull0(dial=addr, recv_timeout=SLOW_TIMEOUT)
+    pusher = pynng.Push0(listen=addr, send_timeout=2000)
+    puller = pynng.Pull0(dial=addr, recv_timeout=5000)
     try:
         async with trio.open_nursery() as nursery:
             async def send_and_close():
@@ -116,11 +114,11 @@ async def test_socket_async_for_stops_on_close_trio():
 @pytest.mark.asyncio
 async def test_socket_async_for_stops_on_close_asyncio():
     """async for stops cleanly when socket is closed externally (asyncio)."""
-    addr = random_addr()
+    addr = "inproc://test-socket-aiter-close-asyncio"
     received = []
 
-    pusher = pynng.Push0(listen=addr, send_timeout=MEDIUM_TIMEOUT)
-    puller = pynng.Pull0(dial=addr, recv_timeout=SLOW_TIMEOUT)
+    pusher = pynng.Push0(listen=addr, send_timeout=2000)
+    puller = pynng.Pull0(dial=addr, recv_timeout=5000)
     try:
         async def send_and_close():
             await pusher.asend(b"hello")
@@ -147,10 +145,10 @@ async def test_socket_async_for_stops_on_close_asyncio():
 @pytest.mark.trio
 async def test_socket_async_with_trio():
     """async with on a socket closes it on exit."""
-    addr = random_addr()
-    async with pynng.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT) as s:
+    addr = "inproc://test-socket-acm-trio"
+    async with pynng.Pair0(listen=addr, recv_timeout=1000) as s:
         assert isinstance(s, pynng.Socket)
-        async with pynng.Pair0(dial=addr, send_timeout=FAST_TIMEOUT) as d:
+        async with pynng.Pair0(dial=addr, send_timeout=1000) as d:
             await d.asend(b"hi")
             assert await s.arecv() == b"hi"
     # After exiting, socket should be closed (listeners cleared)
@@ -163,10 +161,10 @@ async def test_socket_async_with_trio():
 @pytest.mark.asyncio
 async def test_socket_async_with_asyncio():
     """async with on a socket closes it on exit with asyncio."""
-    addr = random_addr()
-    async with pynng.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT) as s:
+    addr = "inproc://test-socket-acm-asyncio"
+    async with pynng.Pair0(listen=addr, recv_timeout=1000) as s:
         assert isinstance(s, pynng.Socket)
-        async with pynng.Pair0(dial=addr, send_timeout=FAST_TIMEOUT) as d:
+        async with pynng.Pair0(dial=addr, send_timeout=1000) as d:
             await d.asend(b"hi")
             assert await s.arecv() == b"hi"
     # After exiting, socket should be closed (listeners cleared)
@@ -179,7 +177,7 @@ async def test_socket_async_with_asyncio():
 @pytest.mark.trio
 async def test_socket_async_with_cleans_up_on_exception_trio():
     """async with on a socket closes it even if an exception occurs."""
-    addr = random_addr()
+    addr = "inproc://test-socket-acm-exc-trio"
     with pytest.raises(RuntimeError, match="intentional"):
         async with pynng.Pair0(listen=addr) as s:
             raise RuntimeError("intentional")
@@ -189,7 +187,7 @@ async def test_socket_async_with_cleans_up_on_exception_trio():
 @pytest.mark.asyncio
 async def test_socket_async_with_cleans_up_on_exception_asyncio():
     """async with on a socket closes it even if an exception occurs."""
-    addr = random_addr()
+    addr = "inproc://test-socket-acm-exc-asyncio"
     with pytest.raises(RuntimeError, match="intentional"):
         async with pynng.Pair0(listen=addr) as s:
             raise RuntimeError("intentional")
@@ -203,7 +201,7 @@ async def test_socket_async_with_cleans_up_on_exception_asyncio():
 @pytest.mark.trio
 async def test_socket_aclose_trio():
     """aclose() closes the socket."""
-    addr = random_addr()
+    addr = "inproc://test-socket-aclose-trio"
     s = pynng.Pair0(listen=addr)
     assert len(s.listeners) == 1
     await s.aclose()
@@ -216,7 +214,7 @@ async def test_socket_aclose_trio():
 @pytest.mark.asyncio
 async def test_socket_aclose_asyncio():
     """aclose() closes the socket with asyncio."""
-    addr = random_addr()
+    addr = "inproc://test-socket-aclose-asyncio"
     s = pynng.Pair0(listen=addr)
     assert len(s.listeners) == 1
     await s.aclose()
@@ -233,10 +231,10 @@ async def test_socket_aclose_asyncio():
 @pytest.mark.trio
 async def test_context_async_for_trio():
     """async for on a context receives messages."""
-    addr = random_addr()
+    addr = "inproc://test-ctx-aiter-trio"
     received = []
-    with pynng.Rep0(listen=addr, recv_timeout=MEDIUM_TIMEOUT) as rep_sock, \
-         pynng.Req0(dial=addr, recv_timeout=MEDIUM_TIMEOUT) as req_sock:
+    with pynng.Rep0(listen=addr, recv_timeout=2000) as rep_sock, \
+         pynng.Req0(dial=addr, recv_timeout=2000) as req_sock:
         ctx_rep = rep_sock.new_context()
         ctx_req = req_sock.new_context()
 
@@ -262,10 +260,10 @@ async def test_context_async_for_trio():
 @pytest.mark.asyncio
 async def test_context_async_for_asyncio():
     """async for on a context receives messages with asyncio."""
-    addr = random_addr()
+    addr = "inproc://test-ctx-aiter-asyncio"
     received = []
-    with pynng.Rep0(listen=addr, recv_timeout=MEDIUM_TIMEOUT) as rep_sock, \
-         pynng.Req0(dial=addr, recv_timeout=MEDIUM_TIMEOUT) as req_sock:
+    with pynng.Rep0(listen=addr, recv_timeout=2000) as rep_sock, \
+         pynng.Req0(dial=addr, recv_timeout=2000) as req_sock:
         ctx_rep = rep_sock.new_context()
         ctx_req = req_sock.new_context()
 
@@ -288,11 +286,11 @@ async def test_context_async_for_asyncio():
 @pytest.mark.trio
 async def test_context_async_for_stops_on_close_trio():
     """async for on a context stops when the parent socket is closed."""
-    addr = random_addr()
+    addr = "inproc://test-ctx-aiter-close-trio"
     received = []
 
-    rep_sock = pynng.Rep0(listen=addr, recv_timeout=SLOW_TIMEOUT)
-    req_sock = pynng.Req0(dial=addr, send_timeout=MEDIUM_TIMEOUT)
+    rep_sock = pynng.Rep0(listen=addr, recv_timeout=5000)
+    req_sock = pynng.Req0(dial=addr, send_timeout=2000)
     try:
         ctx = rep_sock.new_context()
 
@@ -318,11 +316,11 @@ async def test_context_async_for_stops_on_close_trio():
 @pytest.mark.asyncio
 async def test_context_async_for_stops_on_close_asyncio():
     """async for on a context stops when the parent socket is closed (asyncio)."""
-    addr = random_addr()
+    addr = "inproc://test-ctx-aiter-close-asyncio"
     received = []
 
-    rep_sock = pynng.Rep0(listen=addr, recv_timeout=SLOW_TIMEOUT)
-    req_sock = pynng.Req0(dial=addr, send_timeout=MEDIUM_TIMEOUT)
+    rep_sock = pynng.Rep0(listen=addr, recv_timeout=5000)
+    req_sock = pynng.Req0(dial=addr, send_timeout=2000)
     try:
         ctx = rep_sock.new_context()
 
@@ -353,9 +351,9 @@ async def test_context_async_for_stops_on_close_asyncio():
 @pytest.mark.trio
 async def test_context_async_with_trio():
     """async with on a context closes it on exit."""
-    addr = random_addr()
-    with pynng.Req0(listen=addr, recv_timeout=FAST_TIMEOUT) as req_sock, \
-         pynng.Rep0(dial=addr, recv_timeout=FAST_TIMEOUT) as rep_sock:
+    addr = "inproc://test-ctx-acm-trio"
+    with pynng.Req0(listen=addr, recv_timeout=1000) as req_sock, \
+         pynng.Rep0(dial=addr, recv_timeout=1000) as rep_sock:
         async with req_sock.new_context() as ctx_req:
             assert isinstance(ctx_req, pynng.Context)
             async with rep_sock.new_context() as ctx_rep:
@@ -371,9 +369,9 @@ async def test_context_async_with_trio():
 @pytest.mark.asyncio
 async def test_context_async_with_asyncio():
     """async with on a context closes it on exit with asyncio."""
-    addr = random_addr()
-    with pynng.Req0(listen=addr, recv_timeout=FAST_TIMEOUT) as req_sock, \
-         pynng.Rep0(dial=addr, recv_timeout=FAST_TIMEOUT) as rep_sock:
+    addr = "inproc://test-ctx-acm-asyncio"
+    with pynng.Req0(listen=addr, recv_timeout=1000) as req_sock, \
+         pynng.Rep0(dial=addr, recv_timeout=1000) as rep_sock:
         async with req_sock.new_context() as ctx_req:
             assert isinstance(ctx_req, pynng.Context)
             async with rep_sock.new_context() as ctx_rep:
@@ -446,14 +444,14 @@ async def test_asyncio_uses_running_loop():
     Patches get_event_loop at the pynng._aio module level to raise if called,
     ensuring that the code path uses get_running_loop instead.
     """
-    addr = random_addr()
+    addr = "inproc://test-running-loop"
     with unittest.mock.patch.object(
         _aio.asyncio,
         "get_event_loop",
         side_effect=AssertionError("get_event_loop should not be called"),
     ):
-        with pynng.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT) as listener, \
-             pynng.Pair0(dial=addr, send_timeout=FAST_TIMEOUT) as dialer:
+        with pynng.Pair0(listen=addr, recv_timeout=1000) as listener, \
+             pynng.Pair0(dial=addr, send_timeout=1000) as dialer:
             await dialer.asend(b"running-loop-test")
             result = await listener.arecv()
             assert result == b"running-loop-test"
@@ -461,14 +459,15 @@ async def test_asyncio_uses_running_loop():
 
 # --- Dialer/Listener async context manager tests ---
 
+dialer_listener_addr = "inproc://test-dialer-listener-ergonomics"
+
 
 @pytest.mark.trio
 async def test_dialer_async_context_manager_trio():
     """Dialer can be used as an async context manager with trio."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr) as listener_sock:
+    with pynng.Pair0(listen=dialer_listener_addr + "-dialer-trio") as listener_sock:
         with pynng.Pair0() as dialer_sock:
-            dialer = dialer_sock.dial(addr, block=True)
+            dialer = dialer_sock.dial(dialer_listener_addr + "-dialer-trio", block=True)
             async with dialer:
                 await dialer_sock.asend(b"hello from dialer")
                 assert (await listener_sock.arecv()) == b"hello from dialer"
@@ -478,9 +477,8 @@ async def test_dialer_async_context_manager_trio():
 @pytest.mark.trio
 async def test_listener_async_context_manager_trio():
     """Listener can be used as an async context manager with trio."""
-    addr = random_addr()
     with pynng.Pair0() as sock:
-        async with sock.listen(addr) as listener:
+        async with sock.listen(dialer_listener_addr + "-listener-trio") as listener:
             assert listener is not None
         # after exiting async with, listener is closed
 
@@ -488,10 +486,9 @@ async def test_listener_async_context_manager_trio():
 @pytest.mark.asyncio
 async def test_dialer_async_context_manager_asyncio():
     """Dialer can be used as an async context manager with asyncio."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr) as listener_sock:
+    with pynng.Pair0(listen=dialer_listener_addr + "-dialer-asyncio") as listener_sock:
         with pynng.Pair0() as dialer_sock:
-            dialer = dialer_sock.dial(addr, block=True)
+            dialer = dialer_sock.dial(dialer_listener_addr + "-dialer-asyncio", block=True)
             async with dialer:
                 await dialer_sock.asend(b"hello from dialer")
                 assert (await listener_sock.arecv()) == b"hello from dialer"
@@ -500,19 +497,17 @@ async def test_dialer_async_context_manager_asyncio():
 @pytest.mark.asyncio
 async def test_listener_async_context_manager_asyncio():
     """Listener can be used as an async context manager with asyncio."""
-    addr = random_addr()
     with pynng.Pair0() as sock:
-        async with sock.listen(addr) as listener:
+        async with sock.listen(dialer_listener_addr + "-listener-asyncio") as listener:
             assert listener is not None
 
 
 @pytest.mark.trio
 async def test_dialer_aclose_trio():
     """Dialer.aclose() works correctly."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr) as listener_sock:
+    with pynng.Pair0(listen=dialer_listener_addr + "-aclose-trio") as listener_sock:
         with pynng.Pair0() as dialer_sock:
-            dialer = dialer_sock.dial(addr, block=True)
+            dialer = dialer_sock.dial(dialer_listener_addr + "-aclose-trio", block=True)
             await dialer.aclose()
             # dialer should be closed now
 
@@ -520,7 +515,6 @@ async def test_dialer_aclose_trio():
 @pytest.mark.asyncio
 async def test_listener_aclose_asyncio():
     """Listener.aclose() works correctly."""
-    addr = random_addr()
     with pynng.Pair0() as sock:
-        listener = sock.listen(addr)
+        listener = sock.listen(dialer_listener_addr + "-aclose-asyncio")
         await listener.aclose()

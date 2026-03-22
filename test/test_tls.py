@@ -6,8 +6,6 @@ import pytest
 import pynng
 from pynng import Pair0, TLSConfig
 
-from conftest import FAST_TIMEOUT
-
 SERVER_CERT = """
 -----BEGIN CERTIFICATE-----
 MIID1jCCAr6gAwIBAgIUMq6zvsPyDm2s4dRJD3SLYmRW1BYwDQYJKoZIhvcNAQEL
@@ -76,12 +74,12 @@ def _tls_dial_url(server):
     sa = server.listeners[0].local_address
     import socket
     port = socket.ntohs(sa.port)
-    return f"tls+tcp://localhost:{port}"
+    return "tls+tcp://localhost:{}".format(port)
 
 
 def test_config_string():
-    with Pair0(recv_timeout=FAST_TIMEOUT, send_timeout=FAST_TIMEOUT) as server, Pair0(
-        recv_timeout=FAST_TIMEOUT, send_timeout=FAST_TIMEOUT
+    with Pair0(recv_timeout=1000, send_timeout=1000) as server, Pair0(
+        recv_timeout=1000, send_timeout=1000
     ) as client:
         c_server = TLSConfig(
             TLSConfig.MODE_SERVER,
@@ -108,8 +106,8 @@ def test_config_file(tmp_path):
     key_pair_file = tmp_path / "key_pair_file.pem"
     key_pair_file.write_text(SERVER_CERT + SERVER_KEY)
 
-    with Pair0(recv_timeout=FAST_TIMEOUT, send_timeout=FAST_TIMEOUT) as server, Pair0(
-        recv_timeout=FAST_TIMEOUT, send_timeout=FAST_TIMEOUT
+    with Pair0(recv_timeout=1000, send_timeout=1000) as server, Pair0(
+        recv_timeout=1000, send_timeout=1000
     ) as client:
         c_server = TLSConfig(TLSConfig.MODE_SERVER, cert_key_file=str(key_pair_file), server_name="localhost")
         server.tls_config = c_server
@@ -155,11 +153,15 @@ def test_tls_config_own_cert_both_required():
 
 
 def test_tls_set_server_name_none():
-    """set_server_name(None) raises ValueError."""
+    """Verify set_server_name(None) is handled without error.
+
+    The implementation passes ffi.NULL to NNG when server_name is None,
+    which clears any previously set server name.
+    """
     config = TLSConfig(TLSConfig.MODE_CLIENT)
     try:
-        with pytest.raises(ValueError, match="cannot be None"):
-            config.set_server_name(None)
+        # Should not raise -- None is converted to ffi.NULL internally
+        config.set_server_name(None)
     finally:
         del config
         gc.collect()

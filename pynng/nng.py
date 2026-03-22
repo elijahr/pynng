@@ -87,12 +87,12 @@ class _NNGOption:
     def __get__(self, instance, owner):
         # have to look up the getter on the class
         if self._getter is None:
-            raise TypeError(f"{self.__class__} is write-only")
+            raise TypeError("{} is write-only".format(self.__class__))
         return self.__class__._getter(instance, self.option)
 
     def __set__(self, instance, value):
         if self._setter is None:
-            raise TypeError(f"{self.__class__} is readonly")
+            raise TypeError("{} is readonly".format(self.__class__))
         self.__class__._setter(instance, self.option, value)
 
 
@@ -441,8 +441,7 @@ class Socket:
     def __del__(self):
         try:
             self.close()
-        except (TypeError, AttributeError):
-            # During interpreter shutdown, globals (lib, ffi) may be None
+        except Exception:
             pass
 
     @property
@@ -1111,7 +1110,7 @@ class Dialer:
         Close the dialer.
         """
         lib.nng_dialer_close(self.dialer)
-        self.socket._dialers.pop(self.id, None)
+        del self.socket._dialers[self.id]
 
     @property
     def id(self):
@@ -1179,7 +1178,7 @@ class Listener:
         Close the listener.
         """
         lib.nng_listener_close(self.listener)
-        self.socket._listeners.pop(self.id, None)
+        del self.socket._listeners[self.id]
 
     @property
     def id(self):
@@ -1365,8 +1364,7 @@ class Context:
     def __del__(self):
         try:
             self.close()
-        except (TypeError, AttributeError):
-            # During interpreter shutdown, globals (lib, ffi) may be None
+        except Exception:
             pass
 
     async def asend_msg(self, msg):

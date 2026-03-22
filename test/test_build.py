@@ -48,7 +48,7 @@ class TestFFICoreTypes:
         result = ffi.typeof(type_name)
         assert result is not None
         assert result.kind in ("struct", "union"), (
-            f"Expected struct or union for {type_name}, got {result.kind}"
+            "Expected struct or union for {}, got {}".format(type_name, result.kind)
         )
 
     @pytest.mark.parametrize(
@@ -67,7 +67,7 @@ class TestFFICoreTypes:
         result = ffi.typeof(type_name)
         assert result is not None
         assert result.kind == "pointer", (
-            f"Expected pointer for {type_name}, got {result.kind}"
+            "Expected pointer for {}, got {}".format(type_name, result.kind)
         )
 
 

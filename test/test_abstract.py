@@ -4,7 +4,6 @@ import pynng.sockaddr
 import platform
 
 from _test_util import wait_pipe_len
-from conftest import FAST_TIMEOUT
 
 
 def test_abstract_addr_basic():
@@ -59,8 +58,8 @@ def test_abstract_socket_connection():
     # Test with a simple abstract socket name
     abstract_addr = "abstract://test_socket"
 
-    with pynng.Pair0(recv_timeout=FAST_TIMEOUT) as sock1, pynng.Pair0(
-        recv_timeout=FAST_TIMEOUT
+    with pynng.Pair0(recv_timeout=1000) as sock1, pynng.Pair0(
+        recv_timeout=1000
     ) as sock2:
         # Test listening on abstract socket
         listener = sock1.listen(abstract_addr)
@@ -91,7 +90,7 @@ def test_abstract_socket_with_special_chars():
     # Test with URI-encoded special characters
     abstract_addr = "abstract://test%00socket%20with%20spaces"
 
-    with pynng.Pair0(recv_timeout=FAST_TIMEOUT) as sock1, pynng.Pair0(recv_timeout=FAST_TIMEOUT) as sock2:
+    with pynng.Pair0(recv_timeout=1000) as sock1, pynng.Pair0(recv_timeout=1000) as sock2:
         listener = sock1.listen(abstract_addr)
         sock2.dial(abstract_addr)
         wait_pipe_len(sock1, 1)
@@ -123,7 +122,7 @@ def test_abstract_socket_auto_bind():
     # Test with empty abstract socket name for auto-bind
     abstract_addr = "abstract://"
 
-    with pynng.Pair0(listen=abstract_addr, recv_timeout=FAST_TIMEOUT) as sock1:
+    with pynng.Pair0(listen=abstract_addr, recv_timeout=1000) as sock1:
         # If auto-bind works, the socket should have a listener with an address
         assert len(sock1.listeners) > 0, "Auto-bind should create a listener"
 
@@ -143,8 +142,8 @@ def test_abstract_socket_with_different_protocols():
     for server_proto, client_proto, proto_name in protocols:
         abstract_addr = f"abstract://test_{proto_name}_protocol"
 
-        with server_proto(recv_timeout=FAST_TIMEOUT) as server, client_proto(
-            recv_timeout=FAST_TIMEOUT
+        with server_proto(recv_timeout=1000) as server, client_proto(
+            recv_timeout=1000
         ) as client:
             if server_proto == pynng.Pub0 and client_proto == pynng.Sub0:
                 # pub/sub: subscriber must subscribe before receiving

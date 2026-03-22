@@ -1,18 +1,16 @@
 """Shared test fixtures and configuration for pynng tests."""
-import itertools
+import pytest
 
-# Thread-safe address counter (itertools.count is implemented in C and atomic)
-_addr_counter = itertools.count()
+# Standard timeout values (ms) to prevent infinite hangs
+FAST_TIMEOUT = 500     # For inproc operations
+MEDIUM_TIMEOUT = 3000  # For TCP/IPC operations
+SLOW_TIMEOUT = 10000   # For TLS and slow protocols
+
+_addr_counter = 0
 
 
-def random_addr():
+def unique_inproc_addr():
     """Generate a unique inproc address to prevent test interference."""
-    return f"inproc://test-{next(_addr_counter)}"
-
-
-# Standard timeout values (ms) to prevent infinite hangs.
-# Tests that intentionally trigger timeouts use SHORT_TIMEOUT.
-SHORT_TIMEOUT = 50      # For tests that expect a timeout to fire
-FAST_TIMEOUT = 500      # For inproc operations
-MEDIUM_TIMEOUT = 3000   # For TCP/IPC operations
-SLOW_TIMEOUT = 10000    # For TLS and slow protocols
+    global _addr_counter
+    _addr_counter += 1
+    return f"inproc://test-{_addr_counter}"
