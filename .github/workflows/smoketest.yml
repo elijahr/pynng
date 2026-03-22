@@ -1,22 +1,6 @@
 name: smoketest
 
-on:
-  push:
-    paths:
-      - 'pynng/**'
-      - 'build_pynng.py'
-      - 'test/**'
-      - 'pyproject.toml'
-      - 'CMakeLists.txt'
-      - '.github/workflows/smoketest.yml'
-  pull_request:
-    paths:
-      - 'pynng/**'
-      - 'build_pynng.py'
-      - 'test/**'
-      - 'pyproject.toml'
-      - 'CMakeLists.txt'
-      - '.github/workflows/smoketest.yml'
+on: [push, pull_request]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -44,4 +28,4 @@ jobs:
       - run: sudo apt update
       - run: sudo apt install -y ninja-build libclang-dev
       - run: uv pip install --system -v -e '.[dev]'
-      - run: uv run --no-project pytest -v test --ignore=test/test_build.py
+      - run: uv run --no-project pytest -v test

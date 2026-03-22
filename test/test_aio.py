@@ -6,13 +6,12 @@ import trio
 
 import pynng
 
-from conftest import random_addr, FAST_TIMEOUT, MEDIUM_TIMEOUT, SLOW_TIMEOUT
+addr = "inproc://test-addr"
 
 
 @pytest.mark.asyncio
 async def test_arecv_asend_asyncio():
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT) as listener, pynng.Pair0(
+    with pynng.Pair0(listen=addr, recv_timeout=1000) as listener, pynng.Pair0(
         dial=addr
     ) as dialer:
         await dialer.asend(b"hello there buddy")
@@ -21,9 +20,8 @@ async def test_arecv_asend_asyncio():
 
 @pytest.mark.trio
 async def test_asend_arecv_trio():
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=MEDIUM_TIMEOUT) as listener, pynng.Pair0(
-        dial=addr, send_timeout=MEDIUM_TIMEOUT
+    with pynng.Pair0(listen=addr, recv_timeout=2000) as listener, pynng.Pair0(
+        dial=addr, send_timeout=2000
     ) as dialer:
         await dialer.asend(b"hello there")
         assert (await listener.arecv()) == b"hello there"
@@ -31,8 +29,7 @@ async def test_asend_arecv_trio():
 
 @pytest.mark.trio
 async def test_arecv_trio_cancel():
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=SLOW_TIMEOUT) as p0:
+    with pynng.Pair0(listen=addr, recv_timeout=5000) as p0:
         with pytest.raises(trio.TooSlowError):
             with trio.fail_after(0.001):
                 await p0.arecv()
@@ -46,8 +43,7 @@ async def test_arecv_asyncio_cancel():
         await asyncio.sleep(sleep_time)
         fut.cancel()
 
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=SLOW_TIMEOUT) as p0:
+    with pynng.Pair0(listen=addr, recv_timeout=5000) as p0:
         arecv = p0.arecv()
         fut = asyncio.ensure_future(arecv)
         with pytest.raises(asyncio.CancelledError):
@@ -56,7 +52,6 @@ async def test_arecv_asyncio_cancel():
 
 @pytest.mark.asyncio
 async def test_asend_asyncio_send_timeout():
-    addr = random_addr()
     with pytest.raises(pynng.exceptions.Timeout):
         with pynng.Pair0(listen=addr, send_timeout=1) as p0:
             await p0.asend(b"foo")
@@ -64,7 +59,6 @@ async def test_asend_asyncio_send_timeout():
 
 @pytest.mark.trio
 async def test_asend_trio_send_timeout():
-    addr = random_addr()
     with pytest.raises(pynng.exceptions.Timeout):
         with pynng.Pair0(listen=addr, send_timeout=1) as p0:
             await p0.asend(b"foo")
@@ -79,7 +73,6 @@ async def test_pub_sub_trio():
     the evens and 1 for consuming the odds) in separate tasks and have each
     one retrieve values and verify the parity.
     """
-    addr = random_addr()
     sentinel_received = {}
 
     def is_even(i):
@@ -95,7 +88,7 @@ async def test_pub_sub_trio():
 
             for i in range(20):
                 prefix = "even" if is_even(i) else "odd"
-                msg = f"{prefix}:{i}"
+                msg = "{}:{}".format(prefix, i)
                 await pubber.asend(msg.encode("ascii"))
 
             while not all(sentinel_received.values()):
@@ -109,7 +102,7 @@ async def test_pub_sub_trio():
         else:
             expected_values = list(range(1, 20, 2))  # [1, 3, 5, ..., 19]
 
-        with pynng.Sub0(dial=addr, recv_timeout=SLOW_TIMEOUT) as subber:
+        with pynng.Sub0(dial=addr, recv_timeout=5000) as subber:
             subber.subscribe(which + ":")
 
             received_values = []
@@ -141,3 +134,11 @@ async def test_pub_sub_trio():
 
         # head over to the pub
         await pub()
+
+
+@pytest.mark.trio
+async def test_aio_invalid_backend():
+    from pynng import _aio
+    with pynng.Pair0() as s:
+        with pytest.raises(ValueError, match="not currently supported"):
+            _aio.AIOHelper(s, "nonexistent_backend")

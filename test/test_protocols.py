@@ -6,16 +6,16 @@ import pytest
 import pynng
 
 from _test_util import wait_pipe_len
-from conftest import random_addr, FAST_TIMEOUT, MEDIUM_TIMEOUT
 
 # TODO: all sockets need timeouts
 
+addr = "inproc://test-addr"
+
 
 def test_bus():
-    addr = random_addr()
-    with pynng.Bus0(recv_timeout=FAST_TIMEOUT) as s0, pynng.Bus0(
-        recv_timeout=FAST_TIMEOUT
-    ) as s1, pynng.Bus0(recv_timeout=FAST_TIMEOUT) as s2:
+    with pynng.Bus0(recv_timeout=100) as s0, pynng.Bus0(
+        recv_timeout=100
+    ) as s1, pynng.Bus0(recv_timeout=100) as s2:
         s0.listen(addr)
         s1.dial(addr)
         s2.dial(addr)
@@ -31,7 +31,6 @@ def test_bus():
 
 
 def test_context_manager_works():
-    addr = random_addr()
     # Verify the socket is usable inside the context manager
     s0 = pynng.Pair0(listen=addr)
     assert len(s0.listeners) == 1
@@ -44,27 +43,24 @@ def test_context_manager_works():
 
 
 def test_pair0():
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT) as s0, pynng.Pair0(
-        dial=addr, recv_timeout=FAST_TIMEOUT
+    with pynng.Pair0(listen=addr, recv_timeout=100) as s0, pynng.Pair0(
+        dial=addr, recv_timeout=100
     ) as s1:
         s1.send(b"hey howdy there")
         assert s0.recv() == b"hey howdy there"
 
 
 def test_pair1():
-    addr = random_addr()
-    with pynng.Pair1(listen=addr, recv_timeout=FAST_TIMEOUT) as s0, pynng.Pair1(
-        dial=addr, recv_timeout=FAST_TIMEOUT
+    with pynng.Pair1(listen=addr, recv_timeout=100) as s0, pynng.Pair1(
+        dial=addr, recv_timeout=100
     ) as s1:
         s1.send(b"beep boop beep")
         assert s0.recv() == b"beep boop beep"
 
 
 def test_reqrep0():
-    addr = random_addr()
-    with pynng.Req0(listen=addr, recv_timeout=FAST_TIMEOUT) as req, pynng.Rep0(
-        dial=addr, recv_timeout=FAST_TIMEOUT
+    with pynng.Req0(listen=addr, recv_timeout=100) as req, pynng.Rep0(
+        dial=addr, recv_timeout=100
     ) as rep:
         request = b"i am requesting"
         req.send(request)
@@ -83,9 +79,8 @@ def test_reqrep0():
 
 
 def test_pubsub0():
-    addr = random_addr()
-    with pynng.Sub0(listen=addr, recv_timeout=FAST_TIMEOUT) as sub, pynng.Pub0(
-        dial=addr, recv_timeout=FAST_TIMEOUT
+    with pynng.Sub0(listen=addr, recv_timeout=100) as sub, pynng.Pub0(
+        dial=addr, recv_timeout=100
     ) as pub:
         sub.subscribe(b"")
         msg = b"i am requesting"
@@ -112,11 +107,10 @@ def test_pubsub0():
 
 
 def test_push_pull():
-    addr = random_addr()
     received = {"pull1": None, "pull2": None}
     with pynng.Push0(listen=addr) as push, pynng.Pull0(
-        dial=addr, recv_timeout=FAST_TIMEOUT
-    ) as pull1, pynng.Pull0(dial=addr, recv_timeout=FAST_TIMEOUT) as pull2:
+        dial=addr, recv_timeout=1000
+    ) as pull1, pynng.Pull0(dial=addr, recv_timeout=1000) as pull2:
 
         def recv1():
             received["pull1"] = pull1.recv()
@@ -144,10 +138,9 @@ def test_push_pull():
 
 
 def test_surveyor_respondent():
-    addr = random_addr()
-    with pynng.Surveyor0(listen=addr, recv_timeout=MEDIUM_TIMEOUT) as surveyor, pynng.Respondent0(
-        dial=addr, recv_timeout=MEDIUM_TIMEOUT
-    ) as resp1, pynng.Respondent0(dial=addr, recv_timeout=MEDIUM_TIMEOUT) as resp2:
+    with pynng.Surveyor0(listen=addr, recv_timeout=4000) as surveyor, pynng.Respondent0(
+        dial=addr, recv_timeout=4000
+    ) as resp1, pynng.Respondent0(dial=addr, recv_timeout=4000) as resp2:
         query = b"hey how's it going buddy?"
         # wait for sockets to connect
         wait_pipe_len(surveyor, 2)
@@ -172,7 +165,7 @@ def test_surveyor_respondent():
         resp2.send(msg2)
         resp = [surveyor.recv() for _ in range(2)]
         assert set(resp) == {b"not too bad I suppose", msg2}, (
-            f"Unexpected survey responses: {resp}"
+            "Unexpected survey responses: {}".format(resp)
         )
 
         with pytest.raises(pynng.BadState):
@@ -202,11 +195,11 @@ def test_can_instantiate_socket_with_raw_opener():
 
 def test_can_pass_addr_as_bytes_or_str():
     with pynng.Pair0(
-        listen=b"tcp://127.0.0.1:0", recv_timeout=FAST_TIMEOUT
+        listen=b"tcp://127.0.0.1:0", recv_timeout=1000
     ) as s0:
-        actual_addr = f"tcp://{s0.listeners[0].local_address}"
+        actual_addr = "tcp://{}".format(s0.listeners[0].local_address)
         with pynng.Pair0(
-            dial=actual_addr, recv_timeout=FAST_TIMEOUT
+            dial=actual_addr, recv_timeout=1000
         ) as s1:
             wait_pipe_len(s0, 1)
             s1.send(b"hello from str dial")

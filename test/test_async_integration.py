@@ -13,7 +13,15 @@ import trio
 
 import pynng
 from _test_util import wait_pipe_len
-from conftest import random_addr, FAST_TIMEOUT, MEDIUM_TIMEOUT, SLOW_TIMEOUT
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _unique_addr(name):
+    """Return a unique inproc address for the given test name."""
+    return "inproc://test-async-integ-{}".format(name)
 
 
 # ---------------------------------------------------------------------------
@@ -27,14 +35,14 @@ async def test_pubsub_fanout_all_subscribers_receive_trio():
     All subscribers must receive all N messages.  This exercises concurrent
     callback delivery under the GIL with trio.
     """
-    addr = random_addr()
+    addr = _unique_addr("pubsub-fanout-trio")
     num_messages = 20
     num_subs = 3
 
     with pynng.Pub0(listen=addr) as pub:
         subs = []
         for _ in range(num_subs):
-            s = pynng.Sub0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+            s = pynng.Sub0(dial=addr, recv_timeout=3000)
             s.subscribe(b"")
             subs.append(s)
 
@@ -54,7 +62,7 @@ async def test_pubsub_fanout_all_subscribers_receive_trio():
         # Pub/sub is best-effort, so we give a short settling time.
         await trio.sleep(0.05)
         for i in range(num_messages):
-            await pub.asend(f"msg:{i}".encode())
+            await pub.asend("msg:{}".format(i).encode())
 
         async with trio.open_nursery() as nursery:
             for idx, sub in enumerate(subs):
@@ -65,23 +73,23 @@ async def test_pubsub_fanout_all_subscribers_receive_trio():
 
     # Verify all subscribers received all messages
     for idx in range(num_subs):
-        expected = sorted(f"msg:{i}".encode() for i in range(num_messages))
+        expected = sorted("msg:{}".format(i).encode() for i in range(num_messages))
         assert sorted(received[idx]) == expected, (
-            f"Subscriber {idx} received wrong messages: {received[idx]}"
+            "Subscriber {} received wrong messages: {}".format(idx, received[idx])
         )
 
 
 @pytest.mark.asyncio
 async def test_pubsub_fanout_all_subscribers_receive_asyncio():
     """Same as trio variant but with asyncio backend."""
-    addr = random_addr()
+    addr = _unique_addr("pubsub-fanout-asyncio")
     num_messages = 20
     num_subs = 3
 
     with pynng.Pub0(listen=addr) as pub:
         subs = []
         for _ in range(num_subs):
-            s = pynng.Sub0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+            s = pynng.Sub0(dial=addr, recv_timeout=3000)
             s.subscribe(b"")
             subs.append(s)
 
@@ -98,7 +106,7 @@ async def test_pubsub_fanout_all_subscribers_receive_asyncio():
 
         await asyncio.sleep(0.05)
         for i in range(num_messages):
-            await pub.asend(f"msg:{i}".encode())
+            await pub.asend("msg:{}".format(i).encode())
 
         await asyncio.gather(*(recv_all(idx, sub) for idx, sub in enumerate(subs)))
 
@@ -106,22 +114,22 @@ async def test_pubsub_fanout_all_subscribers_receive_asyncio():
             sub.close()
 
     for idx in range(num_subs):
-        expected = sorted(f"msg:{i}".encode() for i in range(num_messages))
+        expected = sorted("msg:{}".format(i).encode() for i in range(num_messages))
         assert sorted(received[idx]) == expected, (
-            f"Subscriber {idx} received wrong messages: {received[idx]}"
+            "Subscriber {} received wrong messages: {}".format(idx, received[idx])
         )
 
 
 @pytest.mark.trio
 async def test_pubsub_topic_filtering_trio():
     """Subscribers with different topic filters only receive matching messages."""
-    addr = random_addr()
+    addr = _unique_addr("pubsub-topics-trio")
     num_per_topic = 10
 
     with pynng.Pub0(listen=addr) as pub:
-        sub_even = pynng.Sub0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+        sub_even = pynng.Sub0(dial=addr, recv_timeout=3000)
         sub_even.subscribe(b"even:")
-        sub_odd = pynng.Sub0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+        sub_odd = pynng.Sub0(dial=addr, recv_timeout=3000)
         sub_odd.subscribe(b"odd:")
 
         wait_pipe_len(pub, 2)
@@ -155,20 +163,20 @@ async def test_pubsub_topic_filtering_trio():
 
     expected_even = sorted(b"even:" + str(i).encode() for i in range(0, num_per_topic * 2, 2))
     expected_odd = sorted(b"odd:" + str(i).encode() for i in range(1, num_per_topic * 2, 2))
-    assert sorted(received_even) == expected_even, f"Even messages wrong: {received_even}"
-    assert sorted(received_odd) == expected_odd, f"Odd messages wrong: {received_odd}"
+    assert sorted(received_even) == expected_even, "Even messages wrong: {}".format(received_even)
+    assert sorted(received_odd) == expected_odd, "Odd messages wrong: {}".format(received_odd)
 
 
 @pytest.mark.asyncio
 async def test_pubsub_topic_filtering_asyncio():
     """Topic filtering with asyncio backend."""
-    addr = random_addr()
+    addr = _unique_addr("pubsub-topics-asyncio")
     num_per_topic = 10
 
     with pynng.Pub0(listen=addr) as pub:
-        sub_even = pynng.Sub0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+        sub_even = pynng.Sub0(dial=addr, recv_timeout=3000)
         sub_even.subscribe(b"even:")
-        sub_odd = pynng.Sub0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+        sub_odd = pynng.Sub0(dial=addr, recv_timeout=3000)
         sub_odd.subscribe(b"odd:")
 
         wait_pipe_len(pub, 2)
@@ -198,8 +206,8 @@ async def test_pubsub_topic_filtering_asyncio():
 
     expected_even = sorted(b"even:" + str(i).encode() for i in range(0, num_per_topic * 2, 2))
     expected_odd = sorted(b"odd:" + str(i).encode() for i in range(1, num_per_topic * 2, 2))
-    assert sorted(received_even) == expected_even, f"Even messages wrong: {received_even}"
-    assert sorted(received_odd) == expected_odd, f"Odd messages wrong: {received_odd}"
+    assert sorted(received_even) == expected_even, "Even messages wrong: {}".format(received_even)
+    assert sorted(received_odd) == expected_odd, "Odd messages wrong: {}".format(received_odd)
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +220,11 @@ async def test_reqrep_concurrent_contexts_trio():
 
     Each request must get back the correct response (no cross-talk).
     """
-    addr = random_addr()
+    addr = _unique_addr("reqrep-ctx-trio")
     num_clients = 4
 
-    with pynng.Rep0(listen=addr, recv_timeout=MEDIUM_TIMEOUT) as rep_sock, \
-         pynng.Req0(dial=addr, recv_timeout=MEDIUM_TIMEOUT) as req_sock:
+    with pynng.Rep0(listen=addr, recv_timeout=3000) as rep_sock, \
+         pynng.Req0(dial=addr, recv_timeout=3000) as req_sock:
         wait_pipe_len(rep_sock, 1)
 
         results = {}
@@ -224,7 +232,7 @@ async def test_reqrep_concurrent_contexts_trio():
         async def client(idx):
             ctx_req = req_sock.new_context()
             try:
-                request = f"request-{idx}".encode()
+                request = "request-{}".format(idx).encode()
                 await ctx_req.asend(request)
                 response = await ctx_req.arecv()
                 results[idx] = response
@@ -249,17 +257,17 @@ async def test_reqrep_concurrent_contexts_trio():
 
     assert len(results) == num_clients
     for idx in range(num_clients):
-        assert results[idx] == f"reply-{idx}".encode()
+        assert results[idx] == "reply-{}".format(idx).encode()
 
 
 @pytest.mark.asyncio
 async def test_reqrep_concurrent_contexts_asyncio():
     """Concurrent req/rep with contexts under asyncio."""
-    addr = random_addr()
+    addr = _unique_addr("reqrep-ctx-asyncio")
     num_clients = 4
 
-    with pynng.Rep0(listen=addr, recv_timeout=MEDIUM_TIMEOUT) as rep_sock, \
-         pynng.Req0(dial=addr, recv_timeout=MEDIUM_TIMEOUT) as req_sock:
+    with pynng.Rep0(listen=addr, recv_timeout=3000) as rep_sock, \
+         pynng.Req0(dial=addr, recv_timeout=3000) as req_sock:
         wait_pipe_len(rep_sock, 1)
 
         results = {}
@@ -267,7 +275,7 @@ async def test_reqrep_concurrent_contexts_asyncio():
         async def client(idx):
             ctx_req = req_sock.new_context()
             try:
-                request = f"request-{idx}".encode()
+                request = "request-{}".format(idx).encode()
                 await ctx_req.asend(request)
                 response = await ctx_req.arecv()
                 results[idx] = response
@@ -291,7 +299,7 @@ async def test_reqrep_concurrent_contexts_asyncio():
 
     assert len(results) == num_clients
     for idx in range(num_clients):
-        assert results[idx] == f"reply-{idx}".encode()
+        assert results[idx] == "reply-{}".format(idx).encode()
 
 
 # ---------------------------------------------------------------------------
@@ -304,16 +312,16 @@ async def test_push_pull_fanout_trio():
 
     Total received across all pullers must equal total sent.
     """
-    addr = random_addr()
+    addr = _unique_addr("pushpull-trio")
     num_messages = 30
     num_pullers = 3
 
     with pynng.Push0(
-        listen=addr, send_timeout=SLOW_TIMEOUT, send_buffer_size=64
+        listen=addr, send_timeout=5000, send_buffer_size=64
     ) as push:
         pullers = []
         for _ in range(num_pullers):
-            p = pynng.Pull0(dial=addr, recv_timeout=MEDIUM_TIMEOUT, recv_buffer_size=64)
+            p = pynng.Pull0(dial=addr, recv_timeout=3000, recv_buffer_size=64)
             pullers.append(p)
 
         wait_pipe_len(push, num_pullers)
@@ -334,7 +342,7 @@ async def test_push_pull_fanout_trio():
 
         async def send_loop():
             for i in range(num_messages):
-                data = f"push-{i}".encode()
+                data = "push-{}".format(i).encode()
                 all_sent.add(data)
                 await push.asend(data)
             send_done.set()
@@ -357,30 +365,30 @@ async def test_push_pull_fanout_trio():
     for r in received:
         all_received.extend(r)
     assert len(all_received) == num_messages, (
-        f"Received {len(all_received)} messages, expected {num_messages}"
+        "Received {} messages, expected {}".format(len(all_received), num_messages)
     )
     assert set(all_received) == all_sent
 
     # Verify distribution: each puller got at least 1 message
     for idx in range(num_pullers):
         assert len(received[idx]) > 0, (
-            f"Puller {idx} received no messages"
+            "Puller {} received no messages".format(idx)
         )
 
 
 @pytest.mark.asyncio
 async def test_push_pull_fanout_asyncio():
     """Push/Pull fan-out with asyncio backend."""
-    addr = random_addr()
+    addr = _unique_addr("pushpull-asyncio")
     num_messages = 30
     num_pullers = 3
 
     with pynng.Push0(
-        listen=addr, send_timeout=SLOW_TIMEOUT, send_buffer_size=64
+        listen=addr, send_timeout=5000, send_buffer_size=64
     ) as push:
         pullers = []
         for _ in range(num_pullers):
-            p = pynng.Pull0(dial=addr, recv_timeout=MEDIUM_TIMEOUT, recv_buffer_size=64)
+            p = pynng.Pull0(dial=addr, recv_timeout=3000, recv_buffer_size=64)
             pullers.append(p)
 
         wait_pipe_len(push, num_pullers)
@@ -401,7 +409,7 @@ async def test_push_pull_fanout_asyncio():
 
         async def send_loop():
             for i in range(num_messages):
-                data = f"push-{i}".encode()
+                data = "push-{}".format(i).encode()
                 all_sent.add(data)
                 await push.asend(data)
             send_done.set()
@@ -438,16 +446,16 @@ async def test_push_pull_fanout_asyncio():
 @pytest.mark.trio
 async def test_pair1_polyamorous_routing_trio():
     """Pair1 listener with polyamorous=True routes messages to specific peers via pipes."""
-    addr = random_addr()
+    addr = _unique_addr("pair1-poly-trio")
     num_dialers = 3
 
     with pynng.Pair1(
-        listen=addr, polyamorous=True, recv_timeout=MEDIUM_TIMEOUT
+        listen=addr, polyamorous=True, recv_timeout=3000
     ) as listener:
         dialers = []
         for _ in range(num_dialers):
             d = pynng.Pair1(
-                dial=addr, polyamorous=True, recv_timeout=MEDIUM_TIMEOUT
+                dial=addr, polyamorous=True, recv_timeout=3000
             )
             dialers.append(d)
 
@@ -457,7 +465,7 @@ async def test_pair1_polyamorous_routing_trio():
 
         # Each dialer sends an identifying message
         for idx, d in enumerate(dialers):
-            await d.asend(f"hello-from-{idx}".encode())
+            await d.asend("hello-from-{}".format(idx).encode())
 
         # Listener receives all messages and tracks which pipe each came from
         pipe_to_dialer_idx = {}
@@ -474,14 +482,14 @@ async def test_pair1_polyamorous_routing_trio():
         for pipe in listener.pipes:
             dialer_idx = pipe_to_dialer_idx[pipe.id]
             await pipe.asend(
-                f"reply-to-{dialer_idx}".encode()
+                "reply-to-{}".format(dialer_idx).encode()
             )
 
         # Each dialer should get only its own reply
         for idx, d in enumerate(dialers):
             reply = await d.arecv()
-            assert reply == f"reply-to-{idx}".encode(), (
-                f"Dialer {idx} got wrong reply: {reply}"
+            assert reply == "reply-to-{}".format(idx).encode(), (
+                "Dialer {} got wrong reply: {}".format(idx, reply)
             )
 
         for d in dialers:
@@ -491,16 +499,16 @@ async def test_pair1_polyamorous_routing_trio():
 @pytest.mark.asyncio
 async def test_pair1_polyamorous_routing_asyncio():
     """Pair1 polyamorous routing with asyncio backend."""
-    addr = random_addr()
+    addr = _unique_addr("pair1-poly-asyncio")
     num_dialers = 3
 
     with pynng.Pair1(
-        listen=addr, polyamorous=True, recv_timeout=MEDIUM_TIMEOUT
+        listen=addr, polyamorous=True, recv_timeout=3000
     ) as listener:
         dialers = []
         for _ in range(num_dialers):
             d = pynng.Pair1(
-                dial=addr, polyamorous=True, recv_timeout=MEDIUM_TIMEOUT
+                dial=addr, polyamorous=True, recv_timeout=3000
             )
             dialers.append(d)
 
@@ -509,7 +517,7 @@ async def test_pair1_polyamorous_routing_asyncio():
             wait_pipe_len(d, 1)
 
         for idx, d in enumerate(dialers):
-            await d.asend(f"hello-from-{idx}".encode())
+            await d.asend("hello-from-{}".format(idx).encode())
 
         pipe_to_dialer_idx = {}
         for _ in range(num_dialers):
@@ -523,12 +531,12 @@ async def test_pair1_polyamorous_routing_asyncio():
         for pipe in listener.pipes:
             dialer_idx = pipe_to_dialer_idx[pipe.id]
             await pipe.asend(
-                f"reply-to-{dialer_idx}".encode()
+                "reply-to-{}".format(dialer_idx).encode()
             )
 
         for idx, d in enumerate(dialers):
             reply = await d.arecv()
-            assert reply == f"reply-to-{idx}".encode()
+            assert reply == "reply-to-{}".format(idx).encode()
 
         for d in dialers:
             d.close()
@@ -545,14 +553,14 @@ async def test_survey_with_partial_responses_trio():
     Verify surveyor collects available responses within timeout and
     does not hang or deadlock.
     """
-    addr = random_addr()
+    addr = _unique_addr("survey-trio")
 
     with pynng.Surveyor0(
-        listen=addr, recv_timeout=MEDIUM_TIMEOUT, survey_time=FAST_TIMEOUT
+        listen=addr, recv_timeout=3000, survey_time=500
     ) as surveyor:
         respondents = []
         for _ in range(3):
-            r = pynng.Respondent0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+            r = pynng.Respondent0(dial=addr, recv_timeout=3000)
             respondents.append(r)
 
         wait_pipe_len(surveyor, 3)
@@ -567,7 +575,7 @@ async def test_survey_with_partial_responses_trio():
             if idx < 2:
                 # First two respondents reply immediately
                 await respondent.asend(
-                    f"response-{idx}".encode()
+                    "response-{}".format(idx).encode()
                 )
             # Third respondent does not reply (simulating slow/absent)
 
@@ -591,21 +599,21 @@ async def test_survey_with_partial_responses_trio():
 
     # Should have exactly 2 responses (from respondents 0 and 1)
     assert sorted(responses_collected) == [b"response-0", b"response-1"], (
-        f"Unexpected survey responses: {responses_collected}"
+        "Unexpected survey responses: {}".format(responses_collected)
     )
 
 
 @pytest.mark.asyncio
 async def test_survey_with_partial_responses_asyncio():
     """Survey pattern with partial responses under asyncio."""
-    addr = random_addr()
+    addr = _unique_addr("survey-asyncio")
 
     with pynng.Surveyor0(
-        listen=addr, recv_timeout=MEDIUM_TIMEOUT, survey_time=FAST_TIMEOUT
+        listen=addr, recv_timeout=3000, survey_time=500
     ) as surveyor:
         respondents = []
         for _ in range(3):
-            r = pynng.Respondent0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
+            r = pynng.Respondent0(dial=addr, recv_timeout=3000)
             respondents.append(r)
 
         wait_pipe_len(surveyor, 3)
@@ -619,7 +627,7 @@ async def test_survey_with_partial_responses_asyncio():
             assert question == b"survey-question"
             if idx < 2:
                 await respondent.asend(
-                    f"response-{idx}".encode()
+                    "response-{}".format(idx).encode()
                 )
 
         async def collect_responses():
@@ -640,7 +648,7 @@ async def test_survey_with_partial_responses_asyncio():
             r.close()
 
     assert sorted(responses_collected) == [b"response-0", b"response-1"], (
-        f"Unexpected survey responses: {responses_collected}"
+        "Unexpected survey responses: {}".format(responses_collected)
     )
 
 
@@ -651,17 +659,17 @@ async def test_survey_with_partial_responses_asyncio():
 @pytest.mark.trio
 async def test_async_for_multiple_sockets_parallel_trio():
     """Multiple sockets consuming messages via async for in parallel."""
-    addr1 = random_addr()
-    addr2 = random_addr()
+    addr1 = _unique_addr("aiter-multi-1-trio")
+    addr2 = _unique_addr("aiter-multi-2-trio")
     num_messages = 5
 
     received1 = []
     received2 = []
 
-    pusher1 = pynng.Push0(listen=addr1, send_timeout=MEDIUM_TIMEOUT)
-    puller1 = pynng.Pull0(dial=addr1, recv_timeout=MEDIUM_TIMEOUT)
-    pusher2 = pynng.Push0(listen=addr2, send_timeout=MEDIUM_TIMEOUT)
-    puller2 = pynng.Pull0(dial=addr2, recv_timeout=MEDIUM_TIMEOUT)
+    pusher1 = pynng.Push0(listen=addr1, send_timeout=2000)
+    puller1 = pynng.Pull0(dial=addr1, recv_timeout=2000)
+    pusher2 = pynng.Push0(listen=addr2, send_timeout=2000)
+    puller2 = pynng.Pull0(dial=addr2, recv_timeout=2000)
 
     wait_pipe_len(pusher1, 1)
     wait_pipe_len(pusher2, 1)
@@ -676,8 +684,8 @@ async def test_async_for_multiple_sockets_parallel_trio():
 
     async def produce():
         for i in range(num_messages):
-            await pusher1.asend(f"s1-{i}".encode())
-            await pusher2.asend(f"s2-{i}".encode())
+            await pusher1.asend("s1-{}".format(i).encode())
+            await pusher2.asend("s2-{}".format(i).encode())
         await trio.sleep(0.05)
         puller1.close()
         puller2.close()
@@ -690,28 +698,28 @@ async def test_async_for_multiple_sockets_parallel_trio():
     pusher1.close()
     pusher2.close()
 
-    assert received1 == [f"s1-{i}".encode() for i in range(num_messages)], (
-        f"Socket 1 received wrong messages: {received1}"
+    assert received1 == ["s1-{}".format(i).encode() for i in range(num_messages)], (
+        "Socket 1 received wrong messages: {}".format(received1)
     )
-    assert received2 == [f"s2-{i}".encode() for i in range(num_messages)], (
-        f"Socket 2 received wrong messages: {received2}"
+    assert received2 == ["s2-{}".format(i).encode() for i in range(num_messages)], (
+        "Socket 2 received wrong messages: {}".format(received2)
     )
 
 
 @pytest.mark.asyncio
 async def test_async_for_multiple_sockets_parallel_asyncio():
     """Multiple sockets consuming via async for in parallel with asyncio."""
-    addr1 = random_addr()
-    addr2 = random_addr()
+    addr1 = _unique_addr("aiter-multi-1-asyncio")
+    addr2 = _unique_addr("aiter-multi-2-asyncio")
     num_messages = 5
 
     received1 = []
     received2 = []
 
-    pusher1 = pynng.Push0(listen=addr1, send_timeout=MEDIUM_TIMEOUT)
-    puller1 = pynng.Pull0(dial=addr1, recv_timeout=MEDIUM_TIMEOUT)
-    pusher2 = pynng.Push0(listen=addr2, send_timeout=MEDIUM_TIMEOUT)
-    puller2 = pynng.Pull0(dial=addr2, recv_timeout=MEDIUM_TIMEOUT)
+    pusher1 = pynng.Push0(listen=addr1, send_timeout=2000)
+    puller1 = pynng.Pull0(dial=addr1, recv_timeout=2000)
+    pusher2 = pynng.Push0(listen=addr2, send_timeout=2000)
+    puller2 = pynng.Pull0(dial=addr2, recv_timeout=2000)
 
     wait_pipe_len(pusher1, 1)
     wait_pipe_len(pusher2, 1)
@@ -726,8 +734,8 @@ async def test_async_for_multiple_sockets_parallel_asyncio():
 
     async def produce():
         for i in range(num_messages):
-            await pusher1.asend(f"s1-{i}".encode())
-            await pusher2.asend(f"s2-{i}".encode())
+            await pusher1.asend("s1-{}".format(i).encode())
+            await pusher2.asend("s2-{}".format(i).encode())
         await asyncio.sleep(0.05)
         puller1.close()
         puller2.close()
@@ -737,27 +745,27 @@ async def test_async_for_multiple_sockets_parallel_asyncio():
     pusher1.close()
     pusher2.close()
 
-    assert received1 == [f"s1-{i}".encode() for i in range(num_messages)], (
-        f"Socket 1 received wrong messages: {received1}"
+    assert received1 == ["s1-{}".format(i).encode() for i in range(num_messages)], (
+        "Socket 1 received wrong messages: {}".format(received1)
     )
-    assert received2 == [f"s2-{i}".encode() for i in range(num_messages)], (
-        f"Socket 2 received wrong messages: {received2}"
+    assert received2 == ["s2-{}".format(i).encode() for i in range(num_messages)], (
+        "Socket 2 received wrong messages: {}".format(received2)
     )
 
 
 @pytest.mark.trio
 async def test_async_for_close_mid_stream_trio():
     """Close socket mid-stream during async for; verify clean shutdown."""
-    addr = random_addr()
+    addr = _unique_addr("aiter-close-mid-trio")
     received = []
 
-    pusher = pynng.Push0(listen=addr, send_timeout=MEDIUM_TIMEOUT)
-    puller = pynng.Pull0(dial=addr, recv_timeout=SLOW_TIMEOUT)
+    pusher = pynng.Push0(listen=addr, send_timeout=2000)
+    puller = pynng.Pull0(dial=addr, recv_timeout=5000)
     wait_pipe_len(pusher, 1)
 
     async def produce():
         for i in range(3):
-            await pusher.asend(f"msg-{i}".encode())
+            await pusher.asend("msg-{}".format(i).encode())
         # Wait for messages to be received, then close the puller
         await trio.sleep(0.1)
         puller.close()
@@ -775,24 +783,24 @@ async def test_async_for_close_mid_stream_trio():
 
     assert len(received) == 3
     for i, msg in enumerate(received):
-        assert msg == f"msg-{i}".encode(), (
-            f"Message {i} content mismatch: got {msg!r}"
+        assert msg == "msg-{}".format(i).encode(), (
+            "Message {} content mismatch: got {!r}".format(i, msg)
         )
 
 
 @pytest.mark.asyncio
 async def test_async_for_close_mid_stream_asyncio():
     """Close socket mid-stream during async for with asyncio."""
-    addr = random_addr()
+    addr = _unique_addr("aiter-close-mid-asyncio")
     received = []
 
-    pusher = pynng.Push0(listen=addr, send_timeout=MEDIUM_TIMEOUT)
-    puller = pynng.Pull0(dial=addr, recv_timeout=SLOW_TIMEOUT)
+    pusher = pynng.Push0(listen=addr, send_timeout=2000)
+    puller = pynng.Pull0(dial=addr, recv_timeout=5000)
     wait_pipe_len(pusher, 1)
 
     async def produce():
         for i in range(3):
-            await pusher.asend(f"msg-{i}".encode())
+            await pusher.asend("msg-{}".format(i).encode())
         await asyncio.sleep(0.05)
         puller.close()
 
@@ -806,8 +814,8 @@ async def test_async_for_close_mid_stream_asyncio():
 
     assert len(received) == 3
     for i, msg in enumerate(received):
-        assert msg == f"msg-{i}".encode(), (
-            f"Message {i} content mismatch: got {msg!r}"
+        assert msg == "msg-{}".format(i).encode(), (
+            "Message {} content mismatch: got {!r}".format(i, msg)
         )
 
 
@@ -822,8 +830,8 @@ async def test_rapid_open_close_trio():
     Verify no segfault, no hang, proper Closed exception each time.
     """
     for i in range(15):
-        addr = random_addr()
-        sock = pynng.Pair0(listen=addr, recv_timeout=SLOW_TIMEOUT)
+        addr = _unique_addr("rapid-{}-trio".format(i))
+        sock = pynng.Pair0(listen=addr, recv_timeout=5000)
 
         async with trio.open_nursery() as nursery:
             got_closed = False
@@ -842,15 +850,15 @@ async def test_rapid_open_close_trio():
             nursery.start_soon(try_recv)
             nursery.start_soon(close_soon)
 
-        assert got_closed, f"Iteration {i} did not get Closed"
+        assert got_closed, "Iteration {} did not get Closed".format(i)
 
 
 @pytest.mark.asyncio
 async def test_rapid_open_close_asyncio():
     """Rapid open/close under asyncio. 10+ iterations."""
     for i in range(15):
-        addr = random_addr()
-        sock = pynng.Pair0(listen=addr, recv_timeout=SLOW_TIMEOUT)
+        addr = _unique_addr("rapid-{}-asyncio".format(i))
+        sock = pynng.Pair0(listen=addr, recv_timeout=5000)
 
         got_closed = False
 
@@ -866,7 +874,7 @@ async def test_rapid_open_close_asyncio():
             sock.close()
 
         await asyncio.gather(try_recv(), close_soon())
-        assert got_closed, f"Iteration {i} did not get Closed"
+        assert got_closed, "Iteration {} did not get Closed".format(i)
 
 
 @pytest.mark.trio
@@ -877,9 +885,9 @@ async def test_rapid_open_close_with_connected_peer_trio():
     segfault or hang, even with an active peer.
     """
     for i in range(10):
-        addr = random_addr()
-        listener = pynng.Pair0(listen=addr, recv_timeout=SLOW_TIMEOUT)
-        dialer = pynng.Pair0(dial=addr, recv_timeout=SLOW_TIMEOUT)
+        addr = _unique_addr("rapid-peer-{}-trio".format(i))
+        listener = pynng.Pair0(listen=addr, recv_timeout=5000)
+        dialer = pynng.Pair0(dial=addr, recv_timeout=5000)
         wait_pipe_len(listener, 1)
 
         async with trio.open_nursery() as nursery:
@@ -907,9 +915,9 @@ async def test_rapid_open_close_with_connected_peer_trio():
 async def test_rapid_open_close_with_connected_peer_asyncio():
     """Open socket, connect peer, start async recv, close quickly under asyncio."""
     for i in range(10):
-        addr = random_addr()
-        listener = pynng.Pair0(listen=addr, recv_timeout=SLOW_TIMEOUT)
-        dialer = pynng.Pair0(dial=addr, recv_timeout=SLOW_TIMEOUT)
+        addr = _unique_addr("rapid-peer-{}-asyncio".format(i))
+        listener = pynng.Pair0(listen=addr, recv_timeout=5000)
+        dialer = pynng.Pair0(dial=addr, recv_timeout=5000)
         wait_pipe_len(listener, 1)
 
         got_exception = False
@@ -937,9 +945,9 @@ async def test_rapid_open_close_with_connected_peer_asyncio():
 @pytest.mark.trio
 async def test_sync_send_async_recv_trio():
     """Socket used for sync send, then async recv (or vice versa)."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=MEDIUM_TIMEOUT, send_timeout=MEDIUM_TIMEOUT) as s0, \
-         pynng.Pair0(dial=addr, recv_timeout=MEDIUM_TIMEOUT, send_timeout=MEDIUM_TIMEOUT) as s1:
+    addr = _unique_addr("mixed-sync-async-trio")
+    with pynng.Pair0(listen=addr, recv_timeout=2000, send_timeout=2000) as s0, \
+         pynng.Pair0(dial=addr, recv_timeout=2000, send_timeout=2000) as s1:
         wait_pipe_len(s0, 1)
 
         # Sync send from s0, async recv on s1
@@ -956,9 +964,9 @@ async def test_sync_send_async_recv_trio():
 @pytest.mark.asyncio
 async def test_sync_send_async_recv_asyncio():
     """Mixed sync/async on same socket with asyncio."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=MEDIUM_TIMEOUT, send_timeout=MEDIUM_TIMEOUT) as s0, \
-         pynng.Pair0(dial=addr, recv_timeout=MEDIUM_TIMEOUT, send_timeout=MEDIUM_TIMEOUT) as s1:
+    addr = _unique_addr("mixed-sync-async-asyncio")
+    with pynng.Pair0(listen=addr, recv_timeout=2000, send_timeout=2000) as s0, \
+         pynng.Pair0(dial=addr, recv_timeout=2000, send_timeout=2000) as s1:
         wait_pipe_len(s0, 1)
 
         # Sync send, async recv
@@ -975,47 +983,47 @@ async def test_sync_send_async_recv_asyncio():
 @pytest.mark.trio
 async def test_alternating_sync_async_trio():
     """Alternate between sync and async operations on the same socket pair."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=MEDIUM_TIMEOUT, send_timeout=MEDIUM_TIMEOUT) as s0, \
-         pynng.Pair0(dial=addr, recv_timeout=MEDIUM_TIMEOUT, send_timeout=MEDIUM_TIMEOUT) as s1:
+    addr = _unique_addr("alternating-trio")
+    with pynng.Pair0(listen=addr, recv_timeout=2000, send_timeout=2000) as s0, \
+         pynng.Pair0(dial=addr, recv_timeout=2000, send_timeout=2000) as s1:
         wait_pipe_len(s0, 1)
 
         for i in range(5):
             if i % 2 == 0:
                 # Sync send from s0
-                s0.send(f"sync-{i}".encode())
+                s0.send("sync-{}".format(i).encode())
                 result = await s1.arecv()
             else:
                 # Async send from s0
-                await s0.asend(f"async-{i}".encode())
+                await s0.asend("async-{}".format(i).encode())
                 result = s1.recv()
 
             if i % 2 == 0:
-                assert result == f"sync-{i}".encode()
+                assert result == "sync-{}".format(i).encode()
             else:
-                assert result == f"async-{i}".encode()
+                assert result == "async-{}".format(i).encode()
 
 
 @pytest.mark.asyncio
 async def test_alternating_sync_async_asyncio():
     """Alternating sync/async with asyncio backend."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=MEDIUM_TIMEOUT, send_timeout=MEDIUM_TIMEOUT) as s0, \
-         pynng.Pair0(dial=addr, recv_timeout=MEDIUM_TIMEOUT, send_timeout=MEDIUM_TIMEOUT) as s1:
+    addr = _unique_addr("alternating-asyncio")
+    with pynng.Pair0(listen=addr, recv_timeout=2000, send_timeout=2000) as s0, \
+         pynng.Pair0(dial=addr, recv_timeout=2000, send_timeout=2000) as s1:
         wait_pipe_len(s0, 1)
 
         for i in range(5):
             if i % 2 == 0:
-                s0.send(f"sync-{i}".encode())
+                s0.send("sync-{}".format(i).encode())
                 result = await s1.arecv()
             else:
-                await s0.asend(f"async-{i}".encode())
+                await s0.asend("async-{}".format(i).encode())
                 result = s1.recv()
 
             if i % 2 == 0:
-                assert result == f"sync-{i}".encode()
+                assert result == "sync-{}".format(i).encode()
             else:
-                assert result == f"async-{i}".encode()
+                assert result == "async-{}".format(i).encode()
 
 
 # ---------------------------------------------------------------------------
@@ -1025,8 +1033,8 @@ async def test_alternating_sync_async_asyncio():
 @pytest.mark.trio
 async def test_send_recv_on_closed_socket_raises_trio():
     """Verify that send/recv on a closed socket raises pynng.Closed."""
-    addr = random_addr()
-    s = pynng.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT, send_timeout=FAST_TIMEOUT)
+    addr = _unique_addr("closed-sock-trio")
+    s = pynng.Pair0(listen=addr, recv_timeout=1000, send_timeout=1000)
     s.close()
 
     with pytest.raises(pynng.Closed):
@@ -1045,8 +1053,8 @@ async def test_send_recv_on_closed_socket_raises_trio():
 @pytest.mark.asyncio
 async def test_send_recv_on_closed_socket_raises_asyncio():
     """Verify that send/recv on a closed socket raises pynng.Closed."""
-    addr = random_addr()
-    s = pynng.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT, send_timeout=FAST_TIMEOUT)
+    addr = _unique_addr("closed-sock-asyncio")
+    s = pynng.Pair0(listen=addr, recv_timeout=1000, send_timeout=1000)
     s.close()
 
     with pytest.raises(pynng.Closed):
@@ -1068,7 +1076,7 @@ async def test_send_recv_on_closed_socket_raises_asyncio():
 
 def test_double_close_socket_is_safe():
     """Verify closing a socket twice does not raise."""
-    addr = random_addr()
+    addr = _unique_addr("dbl-close-sock")
     s = pynng.Pair0(listen=addr)
     s.close()
     s.close()  # Should not raise
@@ -1076,7 +1084,7 @@ def test_double_close_socket_is_safe():
 
 def test_double_close_context_is_safe():
     """Verify closing a context twice does not raise."""
-    addr = random_addr()
+    addr = _unique_addr("dbl-close-ctx")
     with pynng.Req0(listen=addr) as s:
         ctx = s.new_context()
         ctx.close()
@@ -1090,8 +1098,8 @@ def test_double_close_context_is_safe():
 @pytest.mark.trio
 async def test_asend_on_closed_socket_trio():
     """Verify asend on a closed socket raises pynng.Closed."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, send_timeout=FAST_TIMEOUT) as s:
+    addr = _unique_addr("asend-closed-trio")
+    with pynng.Pair0(listen=addr, send_timeout=1000) as s:
         pass  # socket closed after with block
 
     with pytest.raises(pynng.Closed):
@@ -1101,8 +1109,8 @@ async def test_asend_on_closed_socket_trio():
 @pytest.mark.asyncio
 async def test_asend_on_closed_socket_asyncio():
     """Verify asend on a closed socket raises pynng.Closed."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, send_timeout=FAST_TIMEOUT) as s:
+    addr = _unique_addr("asend-closed-asyncio")
+    with pynng.Pair0(listen=addr, send_timeout=1000) as s:
         pass  # socket closed after with block
 
     with pytest.raises(pynng.Closed):
@@ -1116,9 +1124,9 @@ async def test_asend_on_closed_socket_asyncio():
 @pytest.mark.trio
 async def test_send_recv_empty_message_trio():
     """Verify empty messages can be sent and received."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=MEDIUM_TIMEOUT) as s0:
-        with pynng.Pair0(dial=addr, send_timeout=MEDIUM_TIMEOUT) as s1:
+    addr = _unique_addr("empty-msg-trio")
+    with pynng.Pair0(listen=addr, recv_timeout=3000) as s0:
+        with pynng.Pair0(dial=addr, send_timeout=3000) as s1:
             wait_pipe_len(s0, 1)
             await s1.asend(b"")
             result = await s0.arecv()
@@ -1128,9 +1136,9 @@ async def test_send_recv_empty_message_trio():
 @pytest.mark.asyncio
 async def test_send_recv_empty_message_asyncio():
     """Verify empty messages can be sent and received."""
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=MEDIUM_TIMEOUT) as s0:
-        with pynng.Pair0(dial=addr, send_timeout=MEDIUM_TIMEOUT) as s1:
+    addr = _unique_addr("empty-msg-asyncio")
+    with pynng.Pair0(listen=addr, recv_timeout=3000) as s0:
+        with pynng.Pair0(dial=addr, send_timeout=3000) as s1:
             wait_pipe_len(s0, 1)
             await s1.asend(b"")
             result = await s0.arecv()

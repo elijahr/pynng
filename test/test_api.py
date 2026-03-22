@@ -10,12 +10,13 @@ import trio
 import pynng
 
 from _test_util import wait_pipe_len
-from conftest import random_addr, FAST_TIMEOUT, MEDIUM_TIMEOUT
+
+
+addr = "inproc://test-addr"
+addr2 = "inproc://test-addr2"
 
 
 def test_dialers_get_added():
-    addr = random_addr()
-    addr2 = random_addr()
     with pynng.Pair0() as s:
         assert len(s.dialers) == 0
         s.dial(addr, block=False)
@@ -25,8 +26,6 @@ def test_dialers_get_added():
 
 
 def test_listeners_get_added():
-    addr = random_addr()
-    addr2 = random_addr()
     with pynng.Pair0() as s:
         assert len(s.listeners) == 0
         s.listen(addr)
@@ -36,7 +35,6 @@ def test_listeners_get_added():
 
 
 def test_closing_listener_works():
-    addr = random_addr()
     with pynng.Pair0(listen=addr) as s:
         assert len(s.listeners) == 1
         s.listeners[0].close()
@@ -50,7 +48,6 @@ def test_closing_listener_works():
 
 
 def test_closing_dialer_works():
-    addr = random_addr()
     with pynng.Pair0(dial=addr, block_on_dial=False) as s:
         assert len(s.dialers) == 1
         s.dialers[0].close()
@@ -58,14 +55,12 @@ def test_closing_dialer_works():
 
 
 def test_nonblocking_recv_works():
-    addr = random_addr()
     with pynng.Pair0(listen=addr) as s:
         with pytest.raises(pynng.TryAgain):
             s.recv(block=False)
 
 
 def test_nonblocking_send_works():
-    addr = random_addr()
     with pynng.Pair0(listen=addr) as s:
         with pytest.raises(pynng.TryAgain):
             s.send(b"sad message, never will be seen", block=False)
@@ -73,9 +68,8 @@ def test_nonblocking_send_works():
 
 @pytest.mark.trio
 async def test_context():
-    addr = random_addr()
-    with pynng.Req0(listen=addr, recv_timeout=FAST_TIMEOUT) as req_sock, pynng.Rep0(
-        dial=addr, recv_timeout=FAST_TIMEOUT
+    with pynng.Req0(listen=addr, recv_timeout=1000) as req_sock, pynng.Rep0(
+        dial=addr, recv_timeout=1000
     ) as rep_sock:
         with req_sock.new_context() as req, rep_sock.new_context() as rep:
             assert isinstance(req, pynng.Context)
@@ -103,10 +97,9 @@ async def test_multiple_contexts():
         await trio.sleep(0.05)
         await ctx.asend(data)
 
-    addr = random_addr()
-    with pynng.Rep0(listen=addr, recv_timeout=FAST_TIMEOUT) as rep, pynng.Req0(
-        dial=addr, recv_timeout=FAST_TIMEOUT
-    ) as req1, pynng.Req0(dial=addr, recv_timeout=FAST_TIMEOUT) as req2:
+    with pynng.Rep0(listen=addr, recv_timeout=500) as rep, pynng.Req0(
+        dial=addr, recv_timeout=500
+    ) as req1, pynng.Req0(dial=addr, recv_timeout=500) as req2:
         async with trio.open_nursery() as n:
             ctx1, ctx2 = [rep.new_context() for _ in range(2)]
             with ctx1, ctx2:
@@ -120,9 +113,8 @@ async def test_multiple_contexts():
 
 
 def test_synchronous_recv_context():
-    addr = random_addr()
-    with pynng.Rep0(listen=addr, recv_timeout=FAST_TIMEOUT) as rep, pynng.Req0(
-        dial=addr, recv_timeout=FAST_TIMEOUT
+    with pynng.Rep0(listen=addr, recv_timeout=500) as rep, pynng.Req0(
+        dial=addr, recv_timeout=500
     ) as req:
         req.send(b"oh hello there old pal")
         assert rep.recv() == b"oh hello there old pal"
@@ -131,14 +123,13 @@ def test_synchronous_recv_context():
 
 
 def test_pair1_polyamorousness():
-    addr = random_addr()
     with pynng.Pair1(
-        listen=addr, polyamorous=True, recv_timeout=FAST_TIMEOUT
-    ) as s0, pynng.Pair1(dial=addr, polyamorous=True, recv_timeout=FAST_TIMEOUT) as s1:
+        listen=addr, polyamorous=True, recv_timeout=500
+    ) as s0, pynng.Pair1(dial=addr, polyamorous=True, recv_timeout=500) as s1:
         wait_pipe_len(s0, 1)
         # pipe for s1 .
         p1 = s0.pipes[0]
-        with pynng.Pair1(dial=addr, polyamorous=True, recv_timeout=FAST_TIMEOUT) as s2:
+        with pynng.Pair1(dial=addr, polyamorous=True, recv_timeout=500) as s2:
             wait_pipe_len(s0, 2)
             # pipes is backed by a dict, so we can't rely on order in
             # Python 3.5.
@@ -154,15 +145,14 @@ def test_pair1_polyamorousness():
 
 
 def test_sub_sock_options():
-    addr = random_addr()
     with pynng.Pub0(listen=addr) as pub:
         # test single option topic
-        with pynng.Sub0(dial=addr, topics="beep", recv_timeout=MEDIUM_TIMEOUT) as sub:
+        with pynng.Sub0(dial=addr, topics="beep", recv_timeout=1500) as sub:
             wait_pipe_len(sub, 1)
             wait_pipe_len(pub, 1)
             pub.send(b"beep hi")
             assert sub.recv() == b"beep hi"
-        with pynng.Sub0(dial=addr, topics=["beep", "hello"], recv_timeout=FAST_TIMEOUT) as sub:
+        with pynng.Sub0(dial=addr, topics=["beep", "hello"], recv_timeout=500) as sub:
             wait_pipe_len(sub, 1)
             wait_pipe_len(pub, 1)
             pub.send(b"beep hi")
@@ -172,8 +162,7 @@ def test_sub_sock_options():
 
 
 def test_send_str_raises_valueerror():
-    addr = random_addr()
-    with pynng.Pair0(listen=addr) as s:
+    with pynng.Pair0(listen="inproc://test-str") as s:
         with pytest.raises(ValueError, match="Cannot send type str"):
             s.send("forgot to encode")
 
@@ -230,9 +219,8 @@ def test_tls_config_del_after_init_failure():
     reason="Sub0 topic filtering has issues on PyPy wheels"
 )
 def test_sub_unsubscribe():
-    addr = random_addr()
-    with pynng.Pub0(listen=addr) as pub, \
-         pynng.Sub0(dial=addr, topics="beep", recv_timeout=FAST_TIMEOUT) as sub:
+    with pynng.Pub0(listen="inproc://test-unsub") as pub, \
+         pynng.Sub0(dial="inproc://test-unsub", topics="beep", recv_timeout=500) as sub:
         wait_pipe_len(sub, 1)
         wait_pipe_len(pub, 1)
         sub.unsubscribe("beep")
@@ -253,8 +241,8 @@ def test_remove_pipe_callbacks():
     def remove_cb(pipe):
         callback_log.append("remove")
 
-    addr = random_addr()
-    with pynng.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT) as s:
+    listen_addr = "inproc://test-remove-pipe-cb"
+    with pynng.Pair0(listen=listen_addr, recv_timeout=1000) as s:
         # Register all callbacks
         s.add_pre_pipe_connect_cb(pre_cb)
         assert len(s._on_pre_pipe_add) == 1
@@ -273,28 +261,26 @@ def test_remove_pipe_callbacks():
 
         # Behavioral verification: connect a pipe and confirm that the
         # removed callbacks are NOT invoked.
-        with pynng.Pair0(dial=addr) as s2:
+        with pynng.Pair0(dial=listen_addr) as s2:
             wait_pipe_len(s, 1)
 
         # After the dialer closes, give NNG time to fire pipe removal
         time.sleep(0.05)
 
         assert callback_log == [], (
-            f"Removed callbacks should not have been invoked, "
-            f"but got: {callback_log}"
+            "Removed callbacks should not have been invoked, "
+            "but got: {}".format(callback_log)
         )
 
 
 def test_nonblocking_recv_msg():
-    addr = random_addr()
-    with pynng.Pair0(listen=addr) as s:
+    with pynng.Pair0(listen="inproc://test-nb-recv-msg") as s:
         with pytest.raises(pynng.TryAgain):
             s.recv_msg(block=False)
 
 
 def test_nonblocking_send_msg():
-    addr = random_addr()
-    with pynng.Pair0(listen=addr) as s:
+    with pynng.Pair0(listen="inproc://test-nb-send-msg") as s:
         msg = pynng.Message(b"will not send")
         with pytest.raises(pynng.TryAgain):
             s.send_msg(msg, block=False)
