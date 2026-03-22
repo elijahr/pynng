@@ -441,7 +441,8 @@ class Socket:
     def __del__(self):
         try:
             self.close()
-        except Exception:
+        except (TypeError, AttributeError):
+            # During interpreter shutdown, globals (lib, ffi) may be None
             pass
 
     @property
@@ -1364,7 +1365,8 @@ class Context:
     def __del__(self):
         try:
             self.close()
-        except Exception:
+        except (TypeError, AttributeError):
+            # During interpreter shutdown, globals (lib, ffi) may be None
             pass
 
     async def asend_msg(self, msg):

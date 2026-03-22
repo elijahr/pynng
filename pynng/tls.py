@@ -93,7 +93,8 @@ class TLSConfig:
         try:
             if self._tls_config is not None:
                 pynng.lib.nng_tls_config_free(self._tls_config)
-        except Exception:
+        except (TypeError, AttributeError):
+            # During interpreter shutdown, globals (pynng, lib) may be None
             pass
 
     def set_server_name(self, server_name):
