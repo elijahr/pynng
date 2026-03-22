@@ -2,7 +2,21 @@ name: Build
 
 on:
   push:
+    paths:
+      - 'pynng/**'
+      - 'build_pynng.py'
+      - 'pyproject.toml'
+      - 'CMakeLists.txt'
+      - 'patches/**'
+      - '.github/workflows/cibuildwheel.yml'
   pull_request:
+    paths:
+      - 'pynng/**'
+      - 'build_pynng.py'
+      - 'pyproject.toml'
+      - 'CMakeLists.txt'
+      - 'patches/**'
+      - '.github/workflows/cibuildwheel.yml'
   release:
     types: [published]
 
