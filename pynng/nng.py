@@ -1110,7 +1110,7 @@ class Dialer:
         Close the dialer.
         """
         lib.nng_dialer_close(self.dialer)
-        del self.socket._dialers[self.id]
+        self.socket._dialers.pop(self.id, None)
 
     @property
     def id(self):
@@ -1178,7 +1178,7 @@ class Listener:
         Close the listener.
         """
         lib.nng_listener_close(self.listener)
-        del self.socket._listeners[self.id]
+        self.socket._listeners.pop(self.id, None)
 
     @property
     def id(self):
