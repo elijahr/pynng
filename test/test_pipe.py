@@ -3,6 +3,7 @@ Let's test up those pipes
 """
 
 
+import threading
 import time
 
 import pytest
@@ -200,3 +201,35 @@ def test_bad_callbacks_dont_cause_extra_failures():
                 if called_pre_connect:
                     break
             assert called_pre_connect
+
+
+def test_pipes_access_under_contention():
+    """Concurrent pipes access with connection churn does not crash."""
+    a = "inproc://test-pipe-contention-{}".format(id(object()))
+    listener = pynng.Pair0(listen=a)
+    errors = []
+
+    def access_pipes():
+        try:
+            for _ in range(100):
+                _ = listener.pipes
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=access_pipes) for _ in range(4)]
+    for t in threads:
+        t.start()
+
+    dialers = []
+    for _ in range(10):
+        d = pynng.Pair0(dial=a)
+        dialers.append(d)
+
+    for t in threads:
+        t.join()
+
+    for d in dialers:
+        d.close()
+    listener.close()
+
+    assert not errors, f"Thread errors: {errors}"
