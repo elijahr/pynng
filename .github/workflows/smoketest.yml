@@ -1,18 +1,36 @@
 name: smoketest
 
-on: [push, pull_request]
+on:
+  push:
+    paths:
+      - 'pynng/**'
+      - 'build_pynng.py'
+      - 'preprocess.py'
+      - 'test/**'
+      - 'pyproject.toml'
+      - 'CMakeLists.txt'
+      - 'stubs/**'
+      - '.github/workflows/smoketest.yml'
+  pull_request:
+    paths:
+      - 'pynng/**'
+      - 'build_pynng.py'
+      - 'preprocess.py'
+      - 'test/**'
+      - 'pyproject.toml'
+      - 'CMakeLists.txt'
+      - 'stubs/**'
+      - '.github/workflows/smoketest.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Build a single wheel using stable ABI (cp310), installable on all Python 3.10+
   build:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,11 +39,87 @@ jobs:
       - name: Setup python
         uses: actions/setup-python@v5
         with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+      - run: sudo apt update
+      - run: sudo apt install -y ninja-build libclang-dev
+      - name: Build wheel
+        run: uv build --wheel -o dist/
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoketest-wheel
+          path: dist/*.whl
+
+  # Test the pre-built wheel across Python versions
+  test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
           python-version: ${{ matrix.python-version }}
+          architecture: x64
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: smoketest-wheel
+          path: dist/
+      - name: Install wheel and test deps
+        run: uv pip install --system dist/*.whl pytest pytest-asyncio pytest-trio trio
+      - name: Run tests
+        run: pytest -v test --ignore=test/test_build.py
+
+  # Detect whether build-related files changed (for gating build-test job)
+  check-build-changes:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    runs-on: ubuntu-latest
+    outputs:
+      build-changed: ${{ steps.filter.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            build:
+              - 'CMakeLists.txt'
+              - 'build_pynng.py'
+              - 'preprocess.py'
+              - 'pyproject.toml'
+              - 'stubs/**'
+
+  # Test the build system itself (only when build-related files change)
+  build-test:
+    needs: check-build-changes
+    if: needs.check-build-changes.outputs.build-changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
           architecture: x64
       - name: Setup uv
         uses: astral-sh/setup-uv@v4
       - run: sudo apt update
       - run: sudo apt install -y ninja-build libclang-dev
       - run: uv pip install --system -v -e '.[dev]'
-      - run: uv run --no-project pytest -v test
+      - name: Run build tests
+        run: pytest -v test/test_build.py
