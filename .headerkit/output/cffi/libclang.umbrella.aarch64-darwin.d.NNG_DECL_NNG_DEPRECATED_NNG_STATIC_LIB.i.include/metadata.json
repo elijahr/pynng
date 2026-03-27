@@ -1,0 +1,13 @@
+{
+  "cache_key": "ecffa6200d1e3a82725572a728a934ed23e8c4723f9e0e81dd740f15344b3f3b",
+  "created": "2026-04-04T11:03:21.683266+00:00",
+  "headerkit_version": "0.18.0",
+  "ir_cache_key": "d27808c650c5aa9d185e8f1502f7619a784baf3dbd13a907706beb2ab4be540a",
+  "writer_cache_version": null,
+  "writer_name": "cffi",
+  "writer_options": {
+    "define_patterns": "[\"NNG_FLAG_\\\\w+\",\"NNG_\\\\w+_VERSION\",\"NNG_MAXADDRLEN\"]",
+    "exclude_patterns": "[\"nng_tls_config_(pass|key)\"]",
+    "extra_cdef": "[\"extern \\\"Python\\\" void _async_complete(void *);\",\"extern \\\"Python\\\" void _nng_pipe_cb(nng_pipe, nng_pipe_ev, void *);\"]"
+  }
+}

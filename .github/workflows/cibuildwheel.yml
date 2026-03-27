@@ -2,13 +2,32 @@ name: Build
 
 on:
   push:
+    # Only build wheels when build config or native code changes.
+    # Python-only and docs-only changes skip the expensive cross-platform build.
+    paths:
+      - 'build_pynng.py'
+      - 'pyproject.toml'
+      - 'CMakeLists.txt'
+      - 'patches/**'
+      - '.github/workflows/cibuildwheel.yml'
   pull_request:
+    paths:
+      - 'build_pynng.py'
+      - 'pyproject.toml'
+      - 'CMakeLists.txt'
+      - 'patches/**'
+      - '.github/workflows/cibuildwheel.yml'
   release:
     types: [published]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   build_wheels:
@@ -29,26 +48,47 @@ jobs:
       fail-fast: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
 
       # Used to host cibuildwheel
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.23.3
+        uses: pypa/cibuildwheel@v3.4.0
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
+
+      # Collect headerkit store entries for cache population.
+      # Linux: store is on the volume mount at /tmp/headerkit-store.
+      # macOS/Windows: store is in the project directory at .headerkit/.
+      - name: Collect headerkit store (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if [ -d /tmp/headerkit-store ]; then
+            cp -r /tmp/headerkit-store .headerkit-collected
+          fi
+
+      - name: Upload headerkit store
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: headerkit-store-${{ matrix.os }}-${{ strategy.job-index }}
+          path: |
+            .headerkit/
+            .headerkit-collected/
+          if-no-files-found: ignore
+          include-hidden-files: true
 
   # create the source distribution
   make_sdist:
@@ -57,21 +97,98 @@ jobs:
     name: Make SDist
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # Optional, use if you use setuptools_scm
           fetch-tags: true
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Build SDist
         run: uv build --sdist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cibw-sdist
           path: dist/*.tar.gz
+
+  # Merge headerkit store entries from all platforms and open a PR.
+  # Only runs on push to master (not PRs, not releases).
+  update_headerkit_store:
+    name: Update headerkit store
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install headerkit
+        run: pip install 'headerkit>=0.18.0'
+
+      - name: Download headerkit store artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: headerkit-store-*
+          merge-multiple: true
+          path: .headerkit-artifacts/
+
+      - name: Merge store entries
+        run: |
+          # Collect all source store directories from artifacts
+          sources=()
+          # Linux builds: volume-mounted store collected as .headerkit-collected/
+          if [ -d .headerkit-artifacts/.headerkit-collected ]; then
+            sources+=(.headerkit-artifacts/.headerkit-collected)
+          fi
+          # macOS/Windows builds: store in project dir as .headerkit/
+          if [ -d .headerkit-artifacts/.headerkit ]; then
+            sources+=(.headerkit-artifacts/.headerkit)
+          fi
+
+          if [ ${#sources[@]} -eq 0 ]; then
+            echo "No store directories found in artifacts"
+            exit 0
+          fi
+
+          # Use headerkit's store merge to combine platform entries
+          headerkit store merge "${sources[@]}" -o .headerkit/
+          rm -rf .headerkit-artifacts
+
+      - name: Check for store changes
+        id: store-diff
+        run: |
+          git add .headerkit/
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No store changes detected"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Store changes detected:"
+            git diff --cached --stat .headerkit/
+          fi
+
+      - name: Create pull request
+        if: steps.store-diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "chore: update .headerkit store"
+          title: "Update .headerkit store"
+          body: |
+            Automated update of `.headerkit/` directory after successful builds.
+
+            The headerkit store includes IR and output cache entries for all
+            target platforms. When committed, builds on those platforms can
+            skip libclang entirely.
+          branch: update-headerkit-store
+          add-paths: .headerkit/
 
   # To enable PyPI publishing:
   # 1. On pypi.org: Add a "Trusted Publisher" for this repo
@@ -93,14 +210,14 @@ jobs:
       attestations: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: cibw-*
           merge-multiple: true
 
       - name: Generate attestations
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/*"
 

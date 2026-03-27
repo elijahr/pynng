@@ -34,7 +34,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-trio>=0.8.0", "trio>=0.22.0", "headerkit>=0.7.1"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-trio>=0.8.0", "trio>=0.22.0", "headerkit>=0.18.0"]
 docs = ["sphinx", "sphinx-rtd-theme", "sphinxcontrib-trio"]
 
 [project.urls]
@@ -48,7 +48,7 @@ requires = [
     "scikit-build-core>=0.8.0",
     "cffi",
     "cffi_buildtool",
-    "headerkit>=0.7.1",
+    "headerkit>=0.18.0",
     "setuptools-scm",
 ]
 
@@ -67,35 +67,36 @@ version_file = "pynng/_version.py"
 
 [tool.cibuildwheel]
 build-frontend = "build[uv]"
-test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio", "headerkit>=0.7.1"]
+test-requires = ["pytest", "pytest-asyncio", "pytest-trio", "trio", "headerkit>=0.18.0"]
 # test_build.py tests the build system (header parsing via libclang), not the installed wheel.
 # It runs in smoketest (source checkout with build deps); cibuildwheel tests the installed wheel.
 test-command = "pytest {project}/test --ignore={project}/test/test_build.py"
 
-# cp314t-win*: https://github.com/python/cpython/issues/127294
-# *-win32: 32-bit Python can't load 64-bit libclang during build
-# *i686: 32-bit manylinux containers lack package managers for libclang
-# pp*: headerkit's vendored cindex uses c_char_p subclassing incompatible with PyPy's ctypes
-skip = "cp314t-win* *-win32 *i686 pp*"
+# Free-threaded CPython is not supported (CFFI does not support it).
+# *-win32: 32-bit Python can't load 64-bit libclang.dll (no 32-bit libclang available).
+build = "cp3*"
+enable = ["pypy"]
+skip = ["*-win32"]
 
 build-verbosity = 1
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-before-build = "uv run --no-project --with 'headerkit>=0.7.1' python -m headerkit.install_libclang --skip-verify"
+# Mount a host directory so the headerkit store persists outside the container.
+# cibuildwheel copies (not mounts) the project, so .headerkit/ would be lost otherwise.
+container-engine = { name = "docker", create-args = [
+    "--volume", "/tmp/headerkit-store:/headerkit-store"
+]}
+environment = { HEADERKIT_STORE_DIR = "/headerkit-store" }
 
 [tool.cibuildwheel.windows]
 # Windows builds fail because they try to use the same directory for different
 # architectures, and that's no good.
-before-build = "uv run --no-project --with \"headerkit>=0.7.1\" python -m headerkit.install_libclang --skip-verify && python -c \"import shutil; shutil.rmtree('build', ignore_errors=True)\""
-environment = { PATH = "C:\\Program Files\\LLVM\\bin;$PATH" }
+before-build = "python -c \"import shutil; shutil.rmtree('build', ignore_errors=True)\""
 
 [tool.cibuildwheel.macos]
-# Specify universal2 building for macOS
 archs = ["universal2"]
-before-build = "uv run --no-project --with 'headerkit>=0.7.1' python -m headerkit.install_libclang --skip-verify"
-
 environment = { CMAKE_OSX_ARCHITECTURES = "x86_64;arm64" }
 
 [tool.pytest.ini_options]

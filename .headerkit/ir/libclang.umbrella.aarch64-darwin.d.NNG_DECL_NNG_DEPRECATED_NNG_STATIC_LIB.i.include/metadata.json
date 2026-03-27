@@ -1,0 +1,18 @@
+{
+  "backend_name": "libclang",
+  "cache_key": "d27808c650c5aa9d185e8f1502f7619a784baf3dbd13a907706beb2ab4be540a",
+  "created": "2026-04-04T11:03:21.634852+00:00",
+  "defines": [
+    "NNG_DECL",
+    "NNG_DEPRECATED",
+    "NNG_STATIC_LIB"
+  ],
+  "header_path": "umbrella.h",
+  "headerkit_version": "0.18.0",
+  "includes": [
+    "/Users/elijahrutschman/Development/pynng/.claude/worktrees/ci-build-mod/build/cache_regen/_deps/nng-src/include"
+  ],
+  "ir_schema_version": "3",
+  "other_args": [],
+  "target": "aarch64-apple-darwin24.4.0"
+}
