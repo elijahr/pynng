@@ -2,17 +2,16 @@
 
 """Build the pynng CFFI interface.
 
-Uses headerkit's libclang backend to parse NNG C headers into an IR,
-then converts the IR to CFFI cdef strings.
+Uses headerkit to parse NNG C headers and generate CFFI cdef declarations.
+headerkit's two-layer cache (.hkcache/) enables builds without libclang
+when the cache is committed to version control.
 """
 
 import os
 import re
 
-from headerkit.backends import get_backend
 from cffi import FFI
-
-from headerkit.writers.cffi import header_to_cffi
+from headerkit import generate
 
 NNG_INCLUDE_DIR = os.environ.get("NNG_INCLUDE_DIR")
 if NNG_INCLUDE_DIR is None:
@@ -40,46 +39,17 @@ NNG_HEADERS = [
 
 EXCLUDE_PATTERNS = [r"nng_tls_config_(pass|key)"]
 
+# __file__ may not be defined when invoked via cffi_buildtool exec-python.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(
+    __file__ if "__file__" in dir() else os.path.join(os.getcwd(), "build_pynng.py")
+))
 
-def generate_cdef() -> tuple[str, list[str]]:
-    """Parse NNG headers and generate CFFI cdef declarations.
 
-    Returns:
-        A tuple of (cdef_string, existing_headers) where existing_headers
-        is the filtered list of NNG_HEADERS that exist on disk.
-    """
-    # Build umbrella header that includes all existing NNG headers
-    existing = [
+def _existing_header_list() -> list[str]:
+    """Return the filtered list of NNG_HEADERS that exist on disk."""
+    return [
         h for h in NNG_HEADERS if os.path.exists(os.path.join(NNG_INCLUDE_DIR, h))
     ]
-    includes = "\n".join(f"#include <{h}>" for h in existing)
-    umbrella = f"""\
-#define NNG_DECL
-#define NNG_STATIC_LIB
-#define NNG_DEPRECATED
-{includes}
-"""
-
-    # Parse with headerkit libclang backend
-    backend = get_backend("libclang")
-    header = backend.parse(
-        umbrella,
-        "umbrella.h",
-        include_dirs=[NNG_INCLUDE_DIR],
-        project_prefixes=(NNG_INCLUDE_DIR,),
-    )
-
-    # Convert IR to CFFI cdef string
-    cdef = header_to_cffi(header, exclude_patterns=EXCLUDE_PATTERNS)
-
-    # Extract additional #define constants from nng.h via regex
-    # (libclang can miss macro values that involve expressions)
-    nng_h_path = os.path.join(NNG_INCLUDE_DIR, "nng/nng.h")
-    extra_defines = _extract_defines(nng_h_path)
-    if extra_defines:
-        cdef = cdef + "\n" + extra_defines
-
-    return cdef, existing
 
 
 def _extract_defines(nng_h_path: str) -> str:
@@ -97,6 +67,48 @@ def _extract_defines(nng_h_path: str) -> str:
         defines.append(f"#define {name} ...")
 
     return "\n".join(defines)
+
+
+def generate_cdef() -> tuple[str, list[str]]:
+    """Parse NNG headers and generate CFFI cdef declarations.
+
+    Uses headerkit's generate() with two-layer caching. When .hkcache/
+    is committed to the repo, builds succeed without libclang (PyPy,
+    32-bit, or any platform lacking libclang).
+
+    Returns:
+        A tuple of (cdef_string, existing_headers) where existing_headers
+        is the filtered list of NNG_HEADERS that exist on disk.
+    """
+    existing = _existing_header_list()
+    includes = "\n".join(f"#include <{h}>" for h in existing)
+    umbrella = f"""\
+#define NNG_DECL
+#define NNG_STATIC_LIB
+#define NNG_DEPRECATED
+{includes}
+"""
+
+    cdef = generate(
+        "umbrella.h",
+        "cffi",
+        code=umbrella,
+        include_dirs=[NNG_INCLUDE_DIR],
+        defines=["NNG_DECL", "NNG_STATIC_LIB", "NNG_DEPRECATED"],
+        writer_options={"exclude_patterns": EXCLUDE_PATTERNS},
+        project_prefixes=(NNG_INCLUDE_DIR,),
+        cache_dir=os.path.join(_SCRIPT_DIR, ".hkcache"),
+        auto_install_libclang=True,
+    )
+
+    # Extract additional #define constants from nng.h via regex
+    # (libclang does not capture macro values that involve expressions)
+    nng_h_path = os.path.join(NNG_INCLUDE_DIR, "nng/nng.h")
+    extra_defines = _extract_defines(nng_h_path)
+    if extra_defines:
+        cdef = cdef + "\n" + extra_defines
+
+    return cdef, existing
 
 
 # Generate cdef content and get the list of existing headers

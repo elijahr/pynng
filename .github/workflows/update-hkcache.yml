@@ -1,0 +1,72 @@
+name: Update headerkit cache
+
+on:
+  push:
+    paths:
+      - 'build_pynng.py'
+      - 'CMakeLists.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/update-hkcache.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-cache:
+    # Only run on the repo that owns the branch (not on fork PRs)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+
+      - run: sudo apt update && sudo apt install -y ninja-build libclang-dev
+
+      - name: Build to generate NNG headers
+        run: |
+          uv build --wheel -o dist/
+          echo "Build complete, .hkcache/ should be populated"
+
+      - name: Check for cache changes
+        id: cache-diff
+        run: |
+          if git diff --quiet .hkcache/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No cache changes detected"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Cache changes detected:"
+            git diff --stat .hkcache/
+          fi
+
+      - name: Create pull request
+        if: steps.cache-diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "Update headerkit cache"
+          title: "Update headerkit cache"
+          body: |
+            Automated update of `.hkcache/` directory.
+
+            This PR was created because the headerkit cache became stale
+            after changes to build inputs (headers, build script, or
+            headerkit version).
+          branch: update-hkcache/${{ github.ref_name }}
+          base: ${{ github.ref_name }}
+          add-paths: .hkcache/
