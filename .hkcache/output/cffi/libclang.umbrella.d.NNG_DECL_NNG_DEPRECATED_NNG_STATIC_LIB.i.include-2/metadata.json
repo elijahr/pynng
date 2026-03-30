@@ -1,0 +1,11 @@
+{
+  "cache_key": "b06ca8ad34857b1fead26b326af411b7a5336922fe92e673bf95e6c3d2f0cc11",
+  "created": "2026-03-30T03:07:38.943479+00:00",
+  "headerkit_version": "0.12.5",
+  "ir_cache_key": "f4e8941a825722440bbcca72e5ccf42c9cddceaa5bd15ba2a2b5bb42c0c51e26",
+  "writer_cache_version": null,
+  "writer_name": "cffi",
+  "writer_options": {
+    "exclude_patterns": "[\"nng_tls_config_(pass|key)\"]"
+  }
+}
