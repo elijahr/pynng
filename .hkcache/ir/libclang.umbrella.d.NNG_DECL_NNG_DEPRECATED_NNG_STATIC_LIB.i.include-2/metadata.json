@@ -1,0 +1,17 @@
+{
+  "backend_name": "libclang",
+  "cache_key": "f4e8941a825722440bbcca72e5ccf42c9cddceaa5bd15ba2a2b5bb42c0c51e26",
+  "created": "2026-03-30T03:07:38.908071+00:00",
+  "defines": [
+    "NNG_DECL",
+    "NNG_DEPRECATED",
+    "NNG_STATIC_LIB"
+  ],
+  "header_path": "umbrella.h",
+  "headerkit_version": "0.12.5",
+  "includes": [
+    "/home/runner/work/pynng/pynng/build/cpython-312/_deps/nng-src/include"
+  ],
+  "ir_schema_version": "1",
+  "other_args": []
+}
