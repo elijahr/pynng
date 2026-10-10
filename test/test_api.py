@@ -314,3 +314,57 @@ def test_sockets_get_garbage_collected():
         gc.collect()
     after = len([o for o in gc.get_objects() if isinstance(o, pynng.Pub0)])
     assert after == before
+
+
+def test_socket_del_after_close():
+    """Socket.__del__ tolerates a previously closed socket."""
+    sock = pynng.Pair0(listen=random_addr())
+    sock.close()
+    sock.__del__()
+
+
+def test_context_del_after_close():
+    """Context.__del__ tolerates a previously closed context."""
+    sock = pynng.Rep0(listen=random_addr())
+    ctx = sock.new_context()
+    ctx.close()
+    ctx.__del__()
+    sock.close()
+
+
+def test_dialer_double_close():
+    """Closing a dialer twice does not raise."""
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as s0, pynng.Pair0() as s1:
+        dialer = s1.dial(addr)
+        dialer.close()
+        dialer.close()
+
+
+def test_listener_double_close():
+    """Closing a listener twice does not raise."""
+    with pynng.Pair0() as sock:
+        listener = sock.listen(random_addr())
+        listener.close()
+        listener.close()
+
+
+def test_pair1_listen_dial():
+    """Pair1 supports listen and dial."""
+    addr = random_addr()
+    with pynng.Pair1(listen=addr, recv_timeout=FAST_TIMEOUT) as listener, \
+         pynng.Pair1(dial=addr, send_timeout=FAST_TIMEOUT) as dialer:
+        wait_pipe_len(listener, 1)
+        dialer.send(b"hello")
+        assert listener.recv() == b"hello"
+
+
+def test_pair1_polyamorous_send_recv():
+    """Pair1 polyamorous mode sends and receives."""
+    addr = random_addr()
+    with pynng.Pair1(polyamorous=True, listen=addr, recv_timeout=FAST_TIMEOUT) as listener, \
+         pynng.Pair1(polyamorous=True, dial=addr, send_timeout=FAST_TIMEOUT) as dialer:
+        wait_pipe_len(listener, 1)
+        dialer.send(b"poly")
+        assert listener.recv() == b"poly"
+

@@ -186,3 +186,19 @@ def test_message_mem_freed_after_send():
         # __del__ should not crash since _mem_freed is True
         msg.__del__()
         s2.recv_msg()
+
+
+def test_buffer_after_send_raises():
+    """Accessing _buffer after send raises MessageStateError."""
+    addr = random_addr()
+    with pynng.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT) as sender, pynng.Pair0(
+        dial=addr, recv_timeout=FAST_TIMEOUT
+    ) as receiver:
+        wait_pipe_len(sender, 1)
+        msg = pynng.Message(b"hello")
+        sender.send_msg(msg)
+        with pytest.raises(pynng.MessageStateError):
+            _ = msg._buffer
+        received = receiver.recv()
+        assert received == b"hello"
+

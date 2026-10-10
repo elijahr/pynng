@@ -42,21 +42,26 @@ async def test_pubsub_fanout_all_subscribers_receive_trio():
             wait_pipe_len(s, 1)
 
         received = [[] for _ in range(num_subs)]
+        ready_events = [trio.Event() for _ in range(num_subs)]
 
         async def recv_all(idx, sub):
+            ready_events[idx].set()
             for _ in range(num_messages):
                 msg = await sub.arecv()
                 received[idx].append(msg)
 
-        # Send all messages first, then receive.
-        # Pub/sub is best-effort, so we give a short settling time.
-        await trio.sleep(0.05)
-        for i in range(num_messages):
-            await pub.asend(f"msg:{i}".encode())
+        async def sender():
+            for ev in ready_events:
+                await ev.wait()
+            # Give subscribers a checkpoint to reach arecv()
+            await trio.lowlevel.checkpoint()
+            for i in range(num_messages):
+                await pub.asend(f"msg:{i}".encode())
 
         async with trio.open_nursery() as nursery:
             for idx, sub in enumerate(subs):
                 nursery.start_soon(recv_all, idx, sub)
+            nursery.start_soon(sender)
 
         for sub in subs:
             sub.close()
@@ -87,25 +92,33 @@ async def test_pubsub_topic_filtering_trio():
 
         received_even = []
         received_odd = []
+        ready_even = trio.Event()
+        ready_odd = trio.Event()
 
         async def recv_even():
+            ready_even.set()
             for _ in range(num_per_topic):
                 msg = await sub_even.arecv()
                 received_even.append(msg)
 
         async def recv_odd():
+            ready_odd.set()
             for _ in range(num_per_topic):
                 msg = await sub_odd.arecv()
                 received_odd.append(msg)
 
-        await trio.sleep(0.05)
-        for i in range(num_per_topic * 2):
-            prefix = b"even:" if i % 2 == 0 else b"odd:"
-            await pub.asend(prefix + str(i).encode())
+        async def sender():
+            await ready_even.wait()
+            await ready_odd.wait()
+            await trio.lowlevel.checkpoint()
+            for i in range(num_per_topic * 2):
+                prefix = b"even:" if i % 2 == 0 else b"odd:"
+                await pub.asend(prefix + str(i).encode())
 
         async with trio.open_nursery() as nursery:
             nursery.start_soon(recv_even)
             nursery.start_soon(recv_odd)
+            nursery.start_soon(sender)
 
         sub_even.close()
         sub_odd.close()
@@ -114,6 +127,7 @@ async def test_pubsub_topic_filtering_trio():
     expected_odd = sorted(b"odd:" + str(i).encode() for i in range(1, num_per_topic * 2, 2))
     assert sorted(received_even) == expected_even, f"Even messages wrong: {received_even}"
     assert sorted(received_odd) == expected_odd, f"Odd messages wrong: {received_odd}"
+
 
 
 # ---------------------------------------------------------------------------
@@ -144,14 +158,16 @@ async def test_push_pull_fanout_trio():
 
         received = [[] for _ in range(num_pullers)]
         all_sent = set()
-        send_done = trio.Event()
+        all_received_event = trio.Event()
 
         async def recv_loop(idx, puller):
             while True:
                 try:
                     msg = await puller.arecv()
                     received[idx].append(msg)
-                except pynng.Timeout:
+                    if sum(len(r) for r in received) == num_messages:
+                        all_received_event.set()
+                except (pynng.Timeout, pynng.Closed):
                     break
 
         async def send_loop():
@@ -159,20 +175,16 @@ async def test_push_pull_fanout_trio():
                 data = f"push-{i}".encode()
                 all_sent.add(data)
                 await push.asend(data)
-            send_done.set()
 
         async with trio.open_nursery() as nursery:
             for idx, puller in enumerate(pullers):
                 nursery.start_soon(recv_loop, idx, puller)
             nursery.start_soon(send_loop)
-            # Wait for send to finish, then set short recv_timeout
-            await send_done.wait()
-            await trio.sleep(0.1)
+            await all_received_event.wait()
+            # Once all messages arrived, close pullers to exit recv_loop immediately
             for p in pullers:
-                p.recv_timeout = 200
+                p.close()
 
-        for p in pullers:
-            p.close()
 
     # Total received == total sent (no duplication, no loss)
     all_received = []
@@ -333,7 +345,7 @@ async def test_rapid_open_close_trio():
                     got_closed = True
 
             async def close_soon():
-                await trio.sleep(0.01)
+                await trio.lowlevel.checkpoint()
                 sock.close()
 
             nursery.start_soon(try_recv)
@@ -366,8 +378,9 @@ async def test_rapid_open_close_with_connected_peer_trio():
                     got_exception = True
 
             async def close_soon():
-                await trio.sleep(0.01)
+                await trio.lowlevel.checkpoint()
                 listener.close()
+
 
             nursery.start_soon(try_recv)
             nursery.start_soon(close_soon)

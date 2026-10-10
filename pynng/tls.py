@@ -91,8 +91,10 @@ class TLSConfig:
 
     def __del__(self):
         try:
-            if self._tls_config is not None:
-                pynng.lib.nng_tls_config_free(self._tls_config)
+            if getattr(self, "_tls_config", None) is not None:
+                cfg = self._tls_config
+                self._tls_config = None
+                pynng.lib.nng_tls_config_free(cfg)
         except (TypeError, AttributeError):
             # During interpreter shutdown, globals (pynng, lib) may be None
             pass

@@ -33,19 +33,21 @@ async def test_socket_async_for_trio():
     listener = pynng.Push0(listen=addr, send_timeout=MEDIUM_TIMEOUT)
     puller = pynng.Pull0(dial=addr, recv_timeout=MEDIUM_TIMEOUT)
     try:
+        recv_done = trio.Event()
+
         async with trio.open_nursery() as nursery:
             async def send_messages():
                 for i in range(3):
                     await listener.asend(f"msg{i}".encode())
-                # Close after sending all messages with a small delay
-                # to ensure the puller has time to receive
-                await trio.sleep(0.05)
+                await recv_done.wait()
                 puller.close()
 
             nursery.start_soon(send_messages)
 
             async for msg in puller:
                 received.append(msg)
+                if len(received) == 3:
+                    recv_done.set()
     finally:
         puller.close()
         listener.close()
@@ -65,21 +67,25 @@ async def test_socket_async_for_stops_on_close_trio():
     pusher = pynng.Push0(listen=addr, send_timeout=MEDIUM_TIMEOUT)
     puller = pynng.Pull0(dial=addr, recv_timeout=SLOW_TIMEOUT)
     try:
+        recv_done = trio.Event()
+
         async with trio.open_nursery() as nursery:
             async def send_and_close():
                 await pusher.asend(b"hello")
-                await trio.sleep(0.1)
+                await recv_done.wait()
                 puller.close()
 
             nursery.start_soon(send_and_close)
 
             async for msg in puller:
                 received.append(msg)
+                recv_done.set()
     finally:
         puller.close()
         pusher.close()
 
     assert received == [b"hello"]
+
 
 
 # ---------------------------------------------------------------------------
@@ -172,11 +178,12 @@ async def test_context_async_for_stops_on_close_trio():
     req_sock = pynng.Req0(dial=addr, send_timeout=MEDIUM_TIMEOUT)
     try:
         ctx = rep_sock.new_context()
+        recv_done = trio.Event()
 
         async with trio.open_nursery() as nursery:
             async def send_and_close():
                 await req_sock.asend(b"msg")
-                await trio.sleep(0.1)
+                await recv_done.wait()
                 # Closing the parent socket causes the context's arecv to get
                 # a Closed exception, which stops async iteration.
                 rep_sock.close()
@@ -185,11 +192,13 @@ async def test_context_async_for_stops_on_close_trio():
 
             async for msg in ctx:
                 received.append(msg)
+                recv_done.set()
     finally:
         req_sock.close()
         rep_sock.close()
 
     assert received == [b"msg"]
+
 
 
 # ---------------------------------------------------------------------------
@@ -304,10 +313,71 @@ async def test_listener_async_context_manager_trio():
 
 @pytest.mark.trio
 async def test_dialer_aclose_trio():
-    """Dialer.aclose() works correctly."""
+    """Dialer.aclose() works correctly and verifies closed state."""
     addr = random_addr()
     with pynng.Pair0(listen=addr) as listener_sock:
         with pynng.Pair0() as dialer_sock:
             dialer = dialer_sock.dial(addr, block=True)
             await dialer.aclose()
-            # dialer should be closed now
+            assert dialer.id not in dialer_sock._dialers
+            # Calling aclose again should be idempotent (no error)
+            await dialer.aclose()
+
+
+@pytest.mark.trio
+async def test_listener_aclose_trio():
+    """Listener.aclose() works correctly with trio and verifies closed state."""
+    addr = random_addr()
+    with pynng.Pair0() as sock:
+        listener = sock.listen(addr)
+        await listener.aclose()
+        assert listener.id not in sock._listeners
+        # Calling aclose again should be idempotent (no error)
+        await listener.aclose()
+
+
+@pytest.mark.asyncio
+async def test_dialer_async_context_manager_asyncio():
+    """Dialer can be used as an async context manager with asyncio."""
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as listener_sock:
+        with pynng.Pair0() as dialer_sock:
+            dialer = dialer_sock.dial(addr, block=True)
+            async with dialer:
+                await dialer_sock.asend(b"hello from dialer")
+                assert (await listener_sock.arecv()) == b"hello from dialer"
+
+
+@pytest.mark.asyncio
+async def test_listener_async_context_manager_asyncio():
+    """Listener can be used as an async context manager with asyncio."""
+    addr = random_addr()
+    with pynng.Pair0() as sock:
+        async with sock.listen(addr) as listener:
+            assert listener is not None
+
+
+@pytest.mark.asyncio
+async def test_dialer_aclose_asyncio():
+    """Dialer.aclose() works correctly with asyncio and verifies closed state."""
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as listener_sock:
+        with pynng.Pair0() as dialer_sock:
+            dialer = dialer_sock.dial(addr, block=True)
+            await dialer.aclose()
+            assert dialer.id not in dialer_sock._dialers
+            # Calling aclose again should be idempotent (no error)
+            await dialer.aclose()
+
+
+@pytest.mark.asyncio
+async def test_listener_aclose_asyncio():
+    """Listener.aclose() works correctly with asyncio and verifies closed state."""
+    addr = random_addr()
+    with pynng.Pair0() as sock:
+        listener = sock.listen(addr)
+        await listener.aclose()
+        assert listener.id not in sock._listeners
+        # Calling aclose again should be idempotent (no error)
+        await listener.aclose()
+

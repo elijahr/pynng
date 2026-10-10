@@ -3,6 +3,7 @@ Let's test up those pipes
 """
 
 
+import threading
 import time
 
 import pytest
@@ -148,8 +149,8 @@ def test_post_pipe_connect_cb_works():
         s0.add_post_pipe_connect_cb(post_connect_cb)
         s1.dial(addr)
 
-        later = time.time() + 10
-        while later > time.time():
+        later = time.monotonic() + 10
+        while later > time.monotonic():
             if post_called:
                 break
             time.sleep(0.0005)
@@ -171,8 +172,8 @@ def test_post_pipe_remove_cb_works():
         wait_pipe_len(s1, 1)
         assert not post_called
 
-    later = time.time() + 10
-    while later > time.time():
+    later = time.monotonic() + 10
+    while later > time.monotonic():
         if post_called:
             break
         time.sleep(0.0005)
@@ -223,8 +224,8 @@ def test_bad_callbacks_dont_cause_extra_failures():
         s0.add_pre_pipe_connect_cb(pre_connect_cb)
         with pynng.Pair0(dial=addr) as _:
             wait_pipe_len(s0, 1)
-            later = time.time() + 10
-            while later > time.time():
+            later = time.monotonic() + 10
+            while later > time.monotonic():
                 if called_pre_connect:
                     break
                 time.sleep(0.0005)
@@ -291,3 +292,36 @@ def test_pipe_properties():
         wait_pipe_len(s0, 1)
         pipe = s0.pipes[0]
         assert pipe.protocol_name == "pair"
+
+
+def test_pipes_access_under_contention():
+    """Concurrent pipes access with connection churn does not crash."""
+    addr = random_addr()
+    listener = pynng.Pair0(listen=addr)
+    errors = []
+
+    def access_pipes():
+        try:
+            for _ in range(100):
+                _ = listener.pipes
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=access_pipes) for _ in range(4)]
+    for t in threads:
+        t.start()
+
+    dialers = []
+    for _ in range(10):
+        d = pynng.Pair0(dial=addr)
+        dialers.append(d)
+
+    for t in threads:
+        t.join()
+
+    for d in dialers:
+        d.close()
+    listener.close()
+
+    assert not errors, f"Thread errors: {errors}"
+
