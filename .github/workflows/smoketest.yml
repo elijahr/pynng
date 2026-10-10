@@ -1,6 +1,7 @@
 name: smoketest
 
 on:
+  workflow_dispatch:
   push:
     # Run on source, build, and test changes. Docs-only changes skip this
     # workflow since they don't affect runtime behavior.
