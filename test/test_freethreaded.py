@@ -5,6 +5,7 @@ import threading
 import time
 import pytest
 import pynng
+from _test_util import wait_pipe_len
 
 
 def test_gil_disabled_indicator():
@@ -21,10 +22,10 @@ def test_concurrent_multithreaded_pubsub():
     n_publishers = 4
 
     with pynng.Pub0(listen=address) as pub:
-        time.sleep(0.05)
         with pynng.Sub0(dial=address, recv_timeout=2000) as sub:
             sub.subscribe(b"")
-            time.sleep(0.05)
+            wait_pipe_len(pub, 1)
+            wait_pipe_len(sub, 1)
 
             received = []
             recv_lock = threading.Lock()

@@ -142,7 +142,8 @@ jobs:
       - run: sudo apt update
       - run: sudo apt install -y ninja-build libclang-dev
       - name: Verify GIL is disabled
-        run: python -c "import sys; print('GIL enabled:', getattr(sys, '_is_gil_enabled', lambda: True)())"
+        run: |
+          python -c "import sys; print('GIL enabled:', getattr(sys, '_is_gil_enabled', lambda: True)())"
       - name: Install pynng in editable mode
         run: uv pip install --system -v -e '.[dev]'
       - name: Run pytest under free-threaded Python
