@@ -235,13 +235,18 @@ class AIOHelper:
         msg_p = _ffi.new("nng_msg **")
         check_err(_lib.nng_msg_alloc(msg_p, 0))
         msg = msg_p[0]
-        if isinstance(data, bytes):
-            buf = data
-        else:
-            buf = _ffi.from_buffer(data)
-        check_err(_lib.nng_msg_append(msg, buf, len(data)))
-        check_err(_lib.nng_aio_set_msg(self.aio, msg))
-        check_err(self._lib_asend(self._nng_obj, self.aio))
+        try:
+            if isinstance(data, bytes):
+                buf = data
+            else:
+                buf = _ffi.from_buffer(data)
+            check_err(_lib.nng_msg_append(msg, buf, len(data)))
+            check_err(_lib.nng_aio_set_msg(self.aio, msg))
+            check_err(self._lib_asend(self._nng_obj, self.aio))
+        except BaseException:
+            _lib.nng_aio_set_msg(self.aio, _ffi.NULL)
+            _lib.nng_msg_free(msg)
+            raise
         return await self.awaitable
 
     async def asend_msg(self, msg):
@@ -250,28 +255,40 @@ class AIOHelper:
 
         """
         _lib = self._lib
-        _lib.nng_aio_set_msg(self.aio, msg._nng_msg)
-        check_err(self._lib_asend(self._nng_obj, self.aio))
-        msg._mem_freed = True
+        _ffi = self._ffi
+        with msg._mem_freed_lock:
+            msg._ensure_can_send()
+            _lib.nng_aio_set_msg(self.aio, msg._nng_msg)
+            msg._mem_freed = True
+            try:
+                check_err(self._lib_asend(self._nng_obj, self.aio))
+            except BaseException:
+                _lib.nng_aio_set_msg(self.aio, _ffi.NULL)
+                _lib.nng_msg_free(msg._nng_msg)
+                raise
         return await self.awaitable
 
     def _free(self):
         """
         Free resources allocated with nng
         """
-        from ._base import _is_nng_finalized
+        try:
+            from ._base import _is_nng_finalized
 
-        if _is_nng_finalized():
-            self.aio = None
-            if hasattr(self, "cb_arg"):
-                with _aio_map_lock:
-                    _aio_map.pop(id(self.cb_arg), None)
-            return
+            if _is_nng_finalized():
+                self.aio = None
+                if hasattr(self, "cb_arg"):
+                    with _aio_map_lock:
+                        _aio_map.pop(id(self.cb_arg), None)
+                return
+        except (ImportError, AttributeError):
+            pass
 
         if self.aio is not None:
             _lib = self._lib
             # Cancel in-flight AIO before freeing to prevent deadlock during GC.
             _lib.nng_aio_cancel(self.aio)
+            _lib.nng_aio_wait(self.aio)
             _lib.nng_aio_free(self.aio)
             self.aio = None
         if hasattr(self, "cb_arg"):
@@ -332,17 +349,21 @@ class DeviceAIO:
             self._free()
 
     def _free(self):
-        from ._base import _is_nng_finalized
+        try:
+            from ._base import _is_nng_finalized
 
-        if _is_nng_finalized():
-            self.aio = None
-            if hasattr(self, "cb_arg"):
-                with _aio_map_lock:
-                    _aio_map.pop(id(self.cb_arg), None)
-            return
+            if _is_nng_finalized():
+                self.aio = None
+                if hasattr(self, "cb_arg"):
+                    with _aio_map_lock:
+                        _aio_map.pop(id(self.cb_arg), None)
+                return
+        except (ImportError, AttributeError):
+            pass
 
         if self.aio is not None:
             self._lib.nng_aio_cancel(self.aio)
+            self._lib.nng_aio_wait(self.aio)
             self._lib.nng_aio_free(self.aio)
             self.aio = None
         if hasattr(self, "cb_arg"):

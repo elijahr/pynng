@@ -8,7 +8,7 @@ import threading
 
 import pynng
 from ._nng import ffi, lib
-from .exceptions import check_err, NNGException, Closed, NoEntry
+from .exceptions import check_err, NNGException, Closed, NoEntry, BadState, Timeout
 from . import options
 from .stats import stats, socket_stats, Stat
 from . import _aio
@@ -766,6 +766,13 @@ class Surveyor0(Socket):
             except Closed:
                 pass
 
+    def recv_msg(self, block=True):
+        """Receive a message on the surveyor socket, translating survey expiration to Timeout."""
+        try:
+            return super().recv_msg(block=block)
+        except BadState:
+            raise Timeout("Timed out", 5)
+
 
 class Respondent0(Socket):
     """A respondent0 socket.
@@ -1035,12 +1042,18 @@ Socket._message_class = Message
 def _nng_pipe_cb(lib_pipe, event, arg):
     logger.debug("Pipe callback event {}".format(event))
 
-    # Get the Socket from the handle passed through the callback arguments.
-    # If the Socket has been GC'd and the handle is invalid, from_handle()
-    # will crash. Guard against this by catching exceptions.
-    try:
-        sock = ffi.from_handle(arg)
-    except (RuntimeError, ValueError, ffi.error):
+    if arg == ffi.NULL:
+        logger.info(
+            "Pipe callback fired with invalid handle (socket likely GC'd); ignoring"
+        )
+        return
+
+    arg_ptr = int(ffi.cast("uintptr_t", arg))
+    with _active_handles_lock:
+        ref = _active_handles.get(arg_ptr)
+        sock = ref() if ref is not None else None
+
+    if sock is None:
         logger.info(
             "Pipe callback fired with invalid handle (socket likely GC'd); ignoring"
         )
