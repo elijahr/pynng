@@ -147,3 +147,22 @@ async def test_recv_fd_v2_asyncio():
         await s1.asend(b"v2-recvfd")
         msg = await s2.arecv()
         assert msg == b"v2-recvfd"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="recv_fd optimization is POSIX only")
+def test_recv_fd_sequential_event_loops():
+    """Verify socket can be used across separate asyncio.run() event loops."""
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as s1, pynng.Pair0(dial=addr) as s2:
+        async def step1():
+            await s1.asend(b"loop1")
+            return await s2.arecv()
+
+        async def step2():
+            await s1.asend(b"loop2")
+            return await s2.arecv()
+
+        res1 = asyncio.run(step1())
+        res2 = asyncio.run(step2())
+        assert res1 == b"loop1"
+        assert res2 == b"loop2"

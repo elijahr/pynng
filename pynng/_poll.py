@@ -63,9 +63,15 @@ async def _arecv_msg_asyncio(sock, fd, timeout_s):
     """Receive next message using asyncio loop.add_reader on recv_fd."""
     loop = asyncio.get_running_loop()
 
-    # Lazy-initialize per-socket asyncio lock to serialize concurrent readers
-    if not hasattr(sock, "_async_recv_lock") or sock._async_recv_lock is None:
+    # Lazy-initialize per-socket asyncio lock to serialize concurrent readers.
+    # Scoped to the running event loop to prevent cross-loop/cross-thread deadlocks.
+    if (
+        not hasattr(sock, "_async_recv_lock")
+        or sock._async_recv_lock is None
+        or getattr(sock, "_async_recv_lock_loop", None) is not loop
+    ):
         sock._async_recv_lock = asyncio.Lock()
+        sock._async_recv_lock_loop = loop
 
     async with sock._async_recv_lock:
         deadline = (time.monotonic() + timeout_s) if timeout_s is not None else None
@@ -120,8 +126,14 @@ async def _arecv_msg_trio(sock, fd, timeout_s):
     """Receive next message using trio wait_readable on recv_fd."""
     import trio
 
-    if not hasattr(sock, "_trio_recv_lock") or sock._trio_recv_lock is None:
+    token = trio.lowlevel.current_trio_token()
+    if (
+        not hasattr(sock, "_trio_recv_lock")
+        or sock._trio_recv_lock is None
+        or getattr(sock, "_trio_recv_lock_token", None) != token
+    ):
         sock._trio_recv_lock = trio.Lock()
+        sock._trio_recv_lock_token = token
 
     async with sock._trio_recv_lock:
         deadline = (time.monotonic() + timeout_s) if timeout_s is not None else None
@@ -158,6 +170,8 @@ async def _arecv_msg_trio(sock, fd, timeout_s):
                 if getattr(sock, "_socket_closed", False):
                     raise Closed("Socket closed", 2)
             except trio.TooSlowError:
+                if getattr(sock, "_socket_closed", False):
+                    raise Closed("Socket closed", 2)
                 raise Timeout("Timed out", 5)
 
 
