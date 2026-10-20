@@ -58,3 +58,4 @@ _skbuild/
 
 # Vine strand metadata
 .vine.json
+.venv-freethreaded

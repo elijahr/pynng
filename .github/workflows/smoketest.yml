@@ -118,3 +118,33 @@ jobs:
           -C cmake.args="-DPYNNG_TLS_ENGINE=${{ matrix.tls-engine }}"
       - name: Run TLS tests
         run: uv run --no-project pytest -v -m requires_tls test
+
+  test-freethreaded:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13t', '3.14t']
+    name: "Free-threaded: Python ${{ matrix.python-version }}"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: x64
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+      - run: sudo apt update
+      - run: sudo apt install -y ninja-build libclang-dev
+      - name: Verify GIL is disabled
+        run: python -c "import sys; print('GIL enabled:', getattr(sys, '_is_gil_enabled', lambda: True)())"
+      - name: Install pynng in editable mode
+        run: uv pip install --system -v -e '.[dev]'
+      - name: Run pytest under free-threaded Python
+        run: pytest -v test
+

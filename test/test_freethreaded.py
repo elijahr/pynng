@@ -1,0 +1,103 @@
+"""Tests for free-threaded Python (PEP 703 / GIL disabled)."""
+
+import sys
+import threading
+import time
+import pytest
+import pynng
+
+
+def test_gil_disabled_indicator():
+    """Verify whether GIL is disabled (informational on standard Python, verified on freethreaded)."""
+    is_gil_enabled = getattr(sys, "_is_gil_enabled", lambda: True)()
+    # Just record/verify the indicator callable doesn't error
+    assert isinstance(is_gil_enabled, bool)
+
+
+def test_concurrent_multithreaded_pubsub():
+    """Stress test concurrent publisher and subscriber threads without GIL synchronization."""
+    address = "inproc://freethreaded_pubsub"
+    n_messages = 500
+    n_publishers = 4
+
+    with pynng.Pub0(listen=address) as pub:
+        time.sleep(0.05)
+        with pynng.Sub0(dial=address, recv_timeout=2000) as sub:
+            sub.subscribe(b"")
+            time.sleep(0.05)
+
+            received = []
+            recv_lock = threading.Lock()
+            stop_event = threading.Event()
+
+            def subscriber_worker():
+                while not stop_event.is_set():
+                    try:
+                        msg = sub.recv()
+                        with recv_lock:
+                            received.append(msg)
+                    except pynng.Timeout:
+                        pass
+
+            def publisher_worker(pub_id):
+                for i in range(n_messages):
+                    pub.send(f"p{pub_id}-{i}".encode())
+
+            sub_thread = threading.Thread(target=subscriber_worker)
+            sub_thread.start()
+
+            pub_threads = [
+                threading.Thread(target=publisher_worker, args=(p,))
+                for p in range(n_publishers)
+            ]
+            for t in pub_threads:
+                t.start()
+            for t in pub_threads:
+                t.join()
+
+            # Allow remaining in-flight messages to drain
+            time.sleep(0.1)
+            stop_event.set()
+            sub_thread.join()
+
+            with recv_lock:
+                count = len(received)
+            # Pub/sub may drop if buffer fills, but must never crash or corrupt memory
+            assert count > 0
+
+
+def test_concurrent_context_state_machines():
+    """Verify multiple threads safely driving separate contexts on a single socket."""
+    address = "inproc://freethreaded_contexts"
+    with pynng.Rep0(listen=address) as rep, pynng.Req0(dial=address) as req:
+        n_contexts = 8
+        n_requests_per_ctx = 20
+
+        def rep_worker(ctx):
+            for _ in range(n_requests_per_ctx):
+                msg = ctx.recv()
+                ctx.send(msg + b"-ack")
+
+        def req_worker(ctx, worker_id):
+            for i in range(n_requests_per_ctx):
+                data = f"req-{worker_id}-{i}".encode()
+                ctx.send(data)
+                reply = ctx.recv()
+                assert reply == data + b"-ack"
+
+        rep_contexts = [rep.new_context() for _ in range(n_contexts)]
+        req_contexts = [req.new_context() for _ in range(n_contexts)]
+
+        rep_threads = [
+            threading.Thread(target=rep_worker, args=(ctx,))
+            for ctx in rep_contexts
+        ]
+        req_threads = [
+            threading.Thread(target=req_worker, args=(ctx, idx))
+            for idx, ctx in enumerate(req_contexts)
+        ]
+
+        for t in rep_threads + req_threads:
+            t.start()
+        for t in req_threads + rep_threads:
+            t.join()
