@@ -141,9 +141,17 @@ class Socket(_base.Socket):
         """Send data on the socket.
 
         Args:
-            data: bytes or bytearray to send.
+            data: bytes, bytearray, memoryview, or buffer-protocol object to send.
             block: If True (default), blocks until sent or timeout.
-                If False, raises ``pynng.TryAgain`` if cannot send immediately.
+                If False, raises ``pynng.TryAgain`` if cannot send immediately
+                (such as when the send buffer is full).
+
+        .. note::
+
+            In asynchronous code (asyncio/Trio), avoid calling synchronous
+            ``send(data, block=True)`` when the send queue might fill, as it blocks
+            the event loop thread. Use :meth:`~Socket.asend` or non-blocking
+            ``send(data, block=False)`` instead.
         """
         _ensure_can_send(data)
         flags = 0
@@ -158,7 +166,12 @@ class Socket(_base.Socket):
             return await aio.arecv()
 
     async def asend(self, data):
-        """Asynchronous version of :meth:`send`."""
+        """Asynchronous version of :meth:`send`.
+
+        Yields cooperatively to the event loop if the socket's send buffer
+        (:attr:`~Socket.send_buffer_size`) is full, resuming as soon as buffer
+        space becomes available without blocking other coroutines.
+        """
         _ensure_can_send(data)
         with _aio.AIOHelper(self, self._async_backend) as aio:
             return await aio.asend(data)
