@@ -657,6 +657,39 @@ class Socket:
             if self._socket_closed:
                 return
             self._socket_closed = True
+        if hasattr(self, "_async_recv_waiters") and self._async_recv_waiters:
+            from .exceptions import Closed
+
+            exc = Closed("Socket closed", 2)
+            for waiter in list(self._async_recv_waiters):
+                if not waiter.done():
+                    try:
+                        loop = waiter.get_loop()
+                        if loop.is_running():
+                            loop.call_soon_threadsafe(
+                                lambda w=waiter: not w.done() and w.set_exception(exc)
+                            )
+                        else:
+                            waiter.set_exception(exc)
+                    except Exception:
+                        try:
+                            waiter.set_exception(exc)
+                        except Exception:
+                            pass
+            self._async_recv_waiters.clear()
+        if hasattr(self, "_trio_recv_waiters") and self._trio_recv_waiters:
+            for waiter in list(self._trio_recv_waiters):
+                scope, token = waiter
+                try:
+                    scope.cancel()
+                except Exception:
+                    pass
+                if token is not None:
+                    try:
+                        token.run_sync_soon(scope.cancel)
+                    except Exception:
+                        pass
+            self._trio_recv_waiters.clear()
         _lib = self._lib
         version_tag = self._version_tag
         sock_id = _lib.nng_socket_id(self.socket)
@@ -787,6 +820,12 @@ class Socket:
         """
         Asynchronously receive the :class:`Message` ``msg`` on the socket.
         """
+        from . import _poll
+        if _poll.can_use_recv_fd(self):
+            msg = await _poll.arecv_msg_recvfd(self)
+            self._try_associate_msg_with_pipe(msg)
+            return msg
+
         with _aio.AIOHelper(self, self._async_backend) as aio:
             msg = await aio.arecv_msg()
             self._try_associate_msg_with_pipe(msg)

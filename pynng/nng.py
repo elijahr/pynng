@@ -8,7 +8,7 @@ import threading
 
 import pynng
 from ._nng import ffi, lib
-from .exceptions import check_err, NNGException, Closed, NoEntry
+from .exceptions import check_err, NNGException, Closed, NoEntry, Timeout, BadState
 from . import options
 from .stats import stats, socket_stats, Stat
 from . import _aio
@@ -296,8 +296,8 @@ class Socket(_base.Socket):
 
     async def arecv(self):
         """The asynchronous version of :meth:`~Socket.recv`"""
-        with _aio.AIOHelper(self, self._async_backend) as aio:
-            return await aio.arecv()
+        msg = await self.arecv_msg()
+        return msg.bytes
 
     async def asend(self, data):
         """Asynchronous version of :meth:`~Socket.send`."""
@@ -755,7 +755,9 @@ class Surveyor0(Socket):
                 try:
                     response = await self.arecv()
                     responses.append(response)
-                except pynng.Timeout:
+                except (Timeout, BadState):
+                    if getattr(self, "_socket_closed", False):
+                        raise Closed("Socket closed", 2)
                     break
             return responses
         finally:
