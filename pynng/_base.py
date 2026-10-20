@@ -752,10 +752,11 @@ class Socket:
         Returns:
             int: The number of bytes written to buffer.
         """
-        try:
-            return self.recv_into(buffer, block=False)
-        except (TryAgain, Timeout):
-            pass
+        if not hasattr(self, "survey_time"):
+            try:
+                return self.recv_into(buffer, block=False)
+            except (TryAgain, Timeout):
+                pass
         m = memoryview(buffer)
         if m.readonly:
             raise BufferError("buffer must be writable")
@@ -797,12 +798,13 @@ class Socket:
         """
         Asynchronously receive the :class:`Message` ``msg`` on the socket.
         """
-        try:
-            msg = self.recv_msg(block=False)
-            self._try_associate_msg_with_pipe(msg)
-            return msg
-        except (TryAgain, Timeout):
-            pass
+        if not hasattr(self, "survey_time"):
+            try:
+                msg = self.recv_msg(block=False)
+                self._try_associate_msg_with_pipe(msg)
+                return msg
+            except (TryAgain, Timeout):
+                pass
         with _aio.AIOHelper(self, self._async_backend) as aio:
             msg = await aio.arecv_msg()
             self._try_associate_msg_with_pipe(msg)

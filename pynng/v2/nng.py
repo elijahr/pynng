@@ -166,10 +166,11 @@ class Socket(_base.Socket):
 
     async def arecv(self):
         """Asynchronous version of :meth:`recv`."""
-        try:
-            return self.recv(block=False)
-        except (TryAgain, Timeout):
-            pass
+        if not hasattr(self, "survey_time"):
+            try:
+                return self.recv(block=False)
+            except (TryAgain, Timeout):
+                pass
         with _aio.AIOHelper(self, self._async_backend) as aio:
             return await aio.arecv()
 
