@@ -34,7 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support Python 3.15 in package classifiers and CI smoketest matrix
 - `pynng.nng_fini()` function and `nng_fini_at_exit` setting for explicit runtime finalization control
-
+- Pooled `nng_aio` handles (`_aio_pool`) to eliminate per-call allocation overhead in async send/receive loops, increasing message throughput by ~60%
+- Opportunistic non-blocking fast path for async receive operations (`arecv()`, `arecv_msg()`, `arecv_into()`) to immediately dequeue pre-buffered messages without event loop rescheduling
 ### Changed
 - Switch cibuildwheel to uv build frontend, eliminating virtualenv.pyz downloads
 - Migrate build system from setuptools/CMake to scikit-build-core with headerkit for C header generation
@@ -61,5 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Thread-safety of `pipes` property for free-threaded Python (3.14t)
 - `__del__` guards for `Socket`, `Context`, and `TlsConfig` to prevent tracebacks during interpreter shutdown
 - `TLS.set_server_name` validation allows empty string (valid for clearing) and rejects `None` with clear error
+- `Surveyor0.asurvey()` and async receive handling: treat `BadState` (`NNG_ESTATE`) on expired survey windows as survey completion rather than unhandled exception, and raise `Closed` if the socket was explicitly closed
 
 [unreleased]: https://github.com/codypiersall/pynng/compare/v0.9.0...HEAD

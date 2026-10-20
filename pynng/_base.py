@@ -23,7 +23,7 @@ import sniffio
 
 from . import options
 from . import _aio
-from .exceptions import NNGException
+from .exceptions import NNGException, TryAgain, Timeout
 
 logger = logging.getLogger(__name__)
 
@@ -752,6 +752,10 @@ class Socket:
         Returns:
             int: The number of bytes written to buffer.
         """
+        try:
+            return self.recv_into(buffer, block=False)
+        except (TryAgain, Timeout):
+            pass
         m = memoryview(buffer)
         if m.readonly:
             raise BufferError("buffer must be writable")
@@ -788,14 +792,22 @@ class Socket:
                 # Note: the aio helper sets the _mem_freed flag on the msg
                 return await aio.asend_msg(msg)
 
+
     async def arecv_msg(self):
         """
         Asynchronously receive the :class:`Message` ``msg`` on the socket.
         """
+        try:
+            msg = self.recv_msg(block=False)
+            self._try_associate_msg_with_pipe(msg)
+            return msg
+        except (TryAgain, Timeout):
+            pass
         with _aio.AIOHelper(self, self._async_backend) as aio:
             msg = await aio.arecv_msg()
             self._try_associate_msg_with_pipe(msg)
             return msg
+
 
     def __enter__(self):
         return self

@@ -11,11 +11,16 @@ from ._nng import ffi, lib
 from .exceptions import check_err
 
 # global variable for mapping asynchronous operations with the Python data
-# assocated with them.  Key is id(obj), value is obj
+# assocated with them.  Key is slot_id (int), value is rescheduler callable
 _aio_map = {}
 
-# Lock protecting _aio_map. Plain dict operations are atomic under the GIL,
+# Pool of reusable (aio, slot_id, lib) handles to eliminate C heap allocation churn
+_aio_pool = []
+_next_slot_id = 1
+
+# Lock protecting _aio_map and _aio_pool across threads
 _aio_map_lock = threading.Lock()
+
 
 
 @ffi.def_extern()
@@ -184,6 +189,7 @@ class AIOHelper:
             self._lib_arecv = _lib.nng_ctx_recv
             self._lib_asend = _lib.nng_ctx_send
         self.obj = obj
+        self._completed_normally = False
         if async_backend is None:
             async_backend = sniffio.current_async_library()
         if async_backend not in self._aio_helper_map:
@@ -191,13 +197,31 @@ class AIOHelper:
                 "The async backend {} is not currently supported.".format(async_backend)
             )
         self.awaitable, self.cb_arg = self._aio_helper_map[async_backend](self)
-        aio_p = _ffi.new("nng_aio **")
+        self._slot_id = None
         with _aio_map_lock:
-            _aio_map[id(self.cb_arg)] = self.cb_arg
-        idarg = id(self.cb_arg)
-        as_void = _ffi.cast("void *", idarg)
-        _lib.nng_aio_alloc(aio_p, _lib._async_complete, as_void)
-        self.aio = aio_p[0]
+            pooled_idx = None
+            for idx, (p_aio, p_slot, p_lib) in enumerate(_aio_pool):
+                if p_lib is self._lib:
+                    pooled_idx = idx
+                    break
+            if pooled_idx is not None:
+                self.aio, self._slot_id, _ = _aio_pool.pop(pooled_idx)
+                _aio_map[self._slot_id] = self.cb_arg
+                _aio_map[id(self.cb_arg)] = self.cb_arg
+                _lib.nng_aio_set_timeout(self.aio, _lib.NNG_DURATION_DEFAULT)
+                _lib.nng_aio_set_msg(self.aio, _ffi.NULL)
+            else:
+                global _next_slot_id
+                self._slot_id = _next_slot_id
+                _next_slot_id += 1
+                _aio_map[self._slot_id] = self.cb_arg
+                _aio_map[id(self.cb_arg)] = self.cb_arg
+                aio_p = _ffi.new("nng_aio **")
+                as_void = _ffi.cast("void *", self._slot_id)
+                _lib.nng_aio_alloc(aio_p, _lib._async_complete, as_void)
+                self.aio = aio_p[0]
+
+
 
     async def arecv(self):
         msg = await self.arecv_msg()
@@ -215,6 +239,7 @@ class AIOHelper:
                 _lib.nng_msg_free(msg)
             raise
         check_err(_lib.nng_aio_result(self.aio))
+        self._completed_normally = True
         msg = _lib.nng_aio_get_msg(self.aio)
         from ._base import Message, Socket, Context
 
@@ -243,11 +268,13 @@ class AIOHelper:
             check_err(_lib.nng_msg_append(msg, buf, len(data)))
             check_err(_lib.nng_aio_set_msg(self.aio, msg))
             check_err(self._lib_asend(self._nng_obj, self.aio))
+            ret = await self.awaitable
+            self._completed_normally = True
+            return ret
         except BaseException:
             _lib.nng_aio_set_msg(self.aio, _ffi.NULL)
             _lib.nng_msg_free(msg)
             raise
-        return await self.awaitable
 
     async def asend_msg(self, msg):
         """
@@ -261,11 +288,13 @@ class AIOHelper:
         msg._mem_freed = True
         try:
             check_err(self._lib_asend(self._nng_obj, self.aio))
+            ret = await self.awaitable
+            self._completed_normally = True
+            return ret
         except BaseException:
             _lib.nng_aio_set_msg(self.aio, _ffi.NULL)
             _lib.nng_msg_free(msg._nng_msg)
             raise
-        return await self.awaitable
 
     def _free(self):
         """
@@ -276,7 +305,11 @@ class AIOHelper:
 
             if _is_nng_finalized():
                 self.aio = None
-                if hasattr(self, "cb_arg"):
+                if getattr(self, "_slot_id", None) is not None:
+                    with _aio_map_lock:
+                        _aio_map.pop(self._slot_id, None)
+                    self._slot_id = None
+                elif hasattr(self, "cb_arg"):
                     with _aio_map_lock:
                         _aio_map.pop(id(self.cb_arg), None)
                 return
@@ -285,14 +318,36 @@ class AIOHelper:
 
         if self.aio is not None:
             _lib = self._lib
-            # Cancel in-flight AIO before freeing to prevent deadlock during GC.
-            _lib.nng_aio_cancel(self.aio)
-            _lib.nng_aio_wait(self.aio)
-            _lib.nng_aio_free(self.aio)
+            if getattr(self, "_completed_normally", False) and getattr(self, "_slot_id", None) is not None:
+                # Handle completed normally and is completely idle: safe to pool
+                with _aio_map_lock:
+                    _aio_map.pop(self._slot_id, None)
+                    if hasattr(self, "cb_arg"):
+                        _aio_map.pop(id(self.cb_arg), None)
+                    _aio_pool.append((self.aio, self._slot_id, _lib))
+            else:
+                # Cancelled, timed out, or errored: cancel, wait and free without returning to pool
+                _lib.nng_aio_cancel(self.aio)
+                _lib.nng_aio_wait(self.aio)
+                _lib.nng_aio_free(self.aio)
+                with _aio_map_lock:
+                    if getattr(self, "_slot_id", None) is not None:
+                        _aio_map.pop(self._slot_id, None)
+                    if hasattr(self, "cb_arg"):
+                        _aio_map.pop(id(self.cb_arg), None)
             self.aio = None
-        if hasattr(self, "cb_arg"):
+            self._slot_id = None
+        else:
             with _aio_map_lock:
-                _aio_map.pop(id(self.cb_arg), None)
+                if getattr(self, "_slot_id", None) is not None:
+                    _aio_map.pop(self._slot_id, None)
+                if hasattr(self, "cb_arg"):
+                    _aio_map.pop(id(self.cb_arg), None)
+            self._slot_id = None
+
+
+
+
 
     def __enter__(self):
         return self
@@ -377,3 +432,23 @@ class DeviceAIO:
 
     def __del__(self):
         self._free()
+
+
+def _drain_aio_pool():
+    """Drain and free all pooled nng_aio handles during interpreter exit."""
+    from ._base import _is_nng_finalized
+
+    if _is_nng_finalized():
+        return
+    with _aio_map_lock:
+        while _aio_pool:
+            aio, _slot_id, lib_inst = _aio_pool.pop()
+            try:
+                lib_inst.nng_aio_free(aio)
+            except Exception:
+                pass
+
+
+import atexit
+
+atexit.register(_drain_aio_pool)

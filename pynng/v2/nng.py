@@ -12,7 +12,7 @@ import threading
 
 import pynng
 from pynng._nng_v2 import ffi, lib
-from pynng.exceptions import check_err
+from pynng.exceptions import check_err, TryAgain, Timeout, BadState, Closed
 from pynng._base import (
     _ensure_can_send,
     _do_callbacks,
@@ -166,6 +166,10 @@ class Socket(_base.Socket):
 
     async def arecv(self):
         """Asynchronous version of :meth:`recv`."""
+        try:
+            return self.recv(block=False)
+        except (TryAgain, Timeout):
+            pass
         with _aio.AIOHelper(self, self._async_backend) as aio:
             return await aio.arecv()
 
@@ -179,6 +183,8 @@ class Socket(_base.Socket):
         _ensure_can_send(data)
         with _aio.AIOHelper(self, self._async_backend) as aio:
             return await aio.asend(data)
+
+
 
 
 class Bus0(Socket):
@@ -377,7 +383,9 @@ class Surveyor0(Socket):
                 try:
                     response = await self.arecv()
                     responses.append(response)
-                except pynng.Timeout:
+                except (Timeout, BadState):
+                    if getattr(self, "_socket_closed", False):
+                        raise Closed("Socket closed", 2)
                     break
             return responses
         finally:

@@ -303,7 +303,7 @@ async def test_survey_with_partial_responses_trio():
                 try:
                     resp = await surveyor.arecv()
                     responses_collected.append(resp)
-                except pynng.Timeout:
+                except (pynng.Timeout, pynng.BadState):
                     break
 
         async with trio.open_nursery() as nursery:

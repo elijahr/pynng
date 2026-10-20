@@ -233,3 +233,53 @@ def test_aio_map_multithreaded_access():
         futures = [executor.submit(churn_map, i) for i in range(100)]
         for f in futures:
             f.result()
+
+
+@pytest.mark.asyncio
+async def test_aio_pool_reuses_handles():
+    from pynng._aio import _aio_pool, _aio_map_lock
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as s1, pynng.Pair0(dial=addr) as s2:
+        # Perform successive asend and arecv calls
+        for i in range(10):
+            await s1.asend(f"msg-{i}".encode())
+            msg = await s2.arecv()
+            assert msg == f"msg-{i}".encode()
+
+        # Verify that after operations finish normally, the pool holds reusable handles
+        with _aio_map_lock:
+            assert len(_aio_pool) > 0
+
+
+@pytest.mark.asyncio
+async def test_arecv_fastpath_buffered_messages():
+    addr = random_addr()
+    with pynng.Pair0(listen=addr, send_buffer_size=16) as s1, pynng.Pair0(
+        dial=addr, recv_buffer_size=16
+    ) as s2:
+        # Populate socket buffer with 5 messages
+        for i in range(5):
+            await s1.asend(f"fast-{i}".encode())
+
+        # arecv drains them cleanly
+        received = []
+        for _ in range(5):
+            msg = await s2.arecv()
+            received.append(msg)
+
+        assert received == [f"fast-{i}".encode() for i in range(5)]
+
+
+
+@pytest.mark.asyncio
+async def test_arecv_into_fastpath():
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as s1, pynng.Pair0(dial=addr) as s2:
+        await s1.asend(b"buffered data")
+        buf = bytearray(20)
+        n = await s2.arecv_into(buf)
+        assert n == len(b"buffered data")
+        assert bytes(buf[:n]) == b"buffered data"
+
+
+
