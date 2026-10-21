@@ -305,8 +305,8 @@ class Socket(_base.Socket):
 
     async def arecv(self):
         """The asynchronous version of :meth:`~Socket.recv`"""
-        with _aio.AIOHelper(self, self._async_backend) as aio:
-            return await aio.arecv()
+        msg = await self.arecv_msg()
+        return msg.bytes
 
     async def asend(self, data):
         """Asynchronous version of :meth:`~Socket.send`.
@@ -316,8 +316,11 @@ class Socket(_base.Socket):
         space becomes available without blocking other coroutines.
         """
         _ensure_can_send(data)
-        with _aio.AIOHelper(self, self._async_backend) as aio:
-            return await aio.asend(data)
+        helper = self._acquire_send_helper()
+        try:
+            return await helper.asend(data)
+        finally:
+            self._release_send_helper(helper)
 
     def stats(self):
         """Get snapshot of statistics for this socket."""

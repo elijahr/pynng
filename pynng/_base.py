@@ -673,6 +673,12 @@ class Socket:
                     del _active_handles[handle_ptr]
         self._listeners = {}
         self._dialers = {}
+        if hasattr(self, "_recv_pool"):
+            while self._recv_pool:
+                self._recv_pool.pop()._free()
+        if hasattr(self, "_send_pool"):
+            while self._send_pool:
+                self._send_pool.pop()._free()
 
     def __del__(self):
         if _is_nng_finalized():
@@ -777,6 +783,40 @@ class Socket:
             check_err(_lib.nng_sendmsg(self.socket, msg._nng_msg, flags))
             msg._mem_freed = True
 
+    def _acquire_recv_helper(self):
+        if not hasattr(self, "_recv_pool"):
+            self._recv_pool = []
+        if self._recv_pool:
+            return self._recv_pool.pop()
+        return _aio.AIOHelper(self, self._async_backend)
+
+    def _release_recv_helper(self, helper):
+        if (
+            not getattr(self, "_socket_closed", False)
+            and hasattr(self, "_recv_pool")
+            and getattr(helper, "_mpsc_engine", None) is not None
+        ):
+            self._recv_pool.append(helper)
+        else:
+            helper._free()
+
+    def _acquire_send_helper(self):
+        if not hasattr(self, "_send_pool"):
+            self._send_pool = []
+        if self._send_pool:
+            return self._send_pool.pop()
+        return _aio.AIOHelper(self, self._async_backend)
+
+    def _release_send_helper(self, helper):
+        if (
+            not getattr(self, "_socket_closed", False)
+            and hasattr(self, "_send_pool")
+            and getattr(helper, "_mpsc_engine", None) is not None
+        ):
+            self._send_pool.append(helper)
+        else:
+            helper._free()
+
     async def asend_msg(self, msg):
         """
         Asynchronously send the :class:`Message` ``msg`` on the socket.
@@ -784,18 +824,23 @@ class Socket:
         """
         with msg._mem_freed_lock:
             msg._ensure_can_send()
-            with _aio.AIOHelper(self, self._async_backend) as aio:
-                # Note: the aio helper sets the _mem_freed flag on the msg
-                return await aio.asend_msg(msg)
+            helper = self._acquire_send_helper()
+            try:
+                return await helper.asend_msg(msg)
+            finally:
+                self._release_send_helper(helper)
 
     async def arecv_msg(self):
         """
         Asynchronously receive the :class:`Message` ``msg`` on the socket.
         """
-        with _aio.AIOHelper(self, self._async_backend) as aio:
-            msg = await aio.arecv_msg()
+        helper = self._acquire_recv_helper()
+        try:
+            msg = await helper.arecv_msg()
             self._try_associate_msg_with_pipe(msg)
             return msg
+        finally:
+            self._release_recv_helper(helper)
 
     def __enter__(self):
         return self
@@ -1247,16 +1292,53 @@ class Context:
     def _ffi(self):
         return self._socket._ffi
 
+    def _acquire_recv_helper(self):
+        if not hasattr(self, "_recv_pool"):
+            self._recv_pool = []
+        if self._recv_pool:
+            return self._recv_pool.pop()
+        return _aio.AIOHelper(self, self._socket._async_backend)
+
+    def _release_recv_helper(self, helper):
+        if (
+            hasattr(self, "_recv_pool")
+            and self._context is not None
+            and getattr(helper, "_mpsc_engine", None) is not None
+        ):
+            self._recv_pool.append(helper)
+        else:
+            helper._free()
+
+    def _acquire_send_helper(self):
+        if not hasattr(self, "_send_pool"):
+            self._send_pool = []
+        if self._send_pool:
+            return self._send_pool.pop()
+        return _aio.AIOHelper(self, self._socket._async_backend)
+
+    def _release_send_helper(self, helper):
+        if (
+            hasattr(self, "_send_pool")
+            and self._context is not None
+            and getattr(helper, "_mpsc_engine", None) is not None
+        ):
+            self._send_pool.append(helper)
+        else:
+            helper._free()
+
     async def arecv(self):
         """Asynchronously receive data using this context."""
-        with _aio.AIOHelper(self, self._socket._async_backend) as aio:
-            return await aio.arecv()
+        msg = await self.arecv_msg()
+        return msg.bytes
 
     async def asend(self, data):
         """Asynchronously send data using this context."""
         _ensure_can_send(data)
-        with _aio.AIOHelper(self, self._socket._async_backend) as aio:
-            return await aio.asend(data)
+        helper = self._acquire_send_helper()
+        try:
+            return await helper.asend(data)
+        finally:
+            self._release_send_helper(helper)
 
     def recv_msg(self):
         """Synchronously receive a :class:`Message` using this context."""
@@ -1342,6 +1424,12 @@ class Context:
         from .exceptions import check_err
 
         ctx_err = 0
+        if hasattr(self, "_recv_pool"):
+            while self._recv_pool:
+                self._recv_pool.pop()._free()
+        if hasattr(self, "_send_pool"):
+            while self._send_pool:
+                self._send_pool.pop()._free()
         if self._context is not None:
             # check that nng still has a reference
             if _lib.nng_ctx_id(self.context) != -1:
@@ -1401,18 +1489,23 @@ class Context:
         """
         with msg._mem_freed_lock:
             msg._ensure_can_send()
-            with _aio.AIOHelper(self, self._socket._async_backend) as aio:
-                # Note: the aio helper sets the _mem_freed flag on the msg
-                return await aio.asend_msg(msg)
+            helper = self._acquire_send_helper()
+            try:
+                return await helper.asend_msg(msg)
+            finally:
+                self._release_send_helper(helper)
 
     async def arecv_msg(self):
         """
         Asynchronously receive a :class:`Message` on the context.
         """
-        with _aio.AIOHelper(self, self._socket._async_backend) as aio:
-            msg = await aio.arecv_msg()
+        helper = self._acquire_recv_helper()
+        try:
+            msg = await helper.arecv_msg()
             self._socket._try_associate_msg_with_pipe(msg)
             return msg
+        finally:
+            self._release_recv_helper(helper)
 
 
 class Message:
