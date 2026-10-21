@@ -70,14 +70,22 @@ def test_concurrent_multithreaded_pubsub():
 def test_concurrent_context_state_machines():
     """Verify multiple threads safely driving separate contexts on a single socket."""
     address = "inproc://freethreaded_contexts"
-    with pynng.Rep0(listen=address) as rep, pynng.Req0(dial=address) as req:
+    with pynng.Rep0(listen=address, recv_timeout=200) as rep, pynng.Req0(
+        dial=address, recv_timeout=2000
+    ) as req:
+        wait_pipe_len(rep, 1)
+        wait_pipe_len(req, 1)
         n_contexts = 8
         n_requests_per_ctx = 20
+        stop_event = threading.Event()
 
         def rep_worker(ctx):
-            for _ in range(n_requests_per_ctx):
-                msg = ctx.recv()
-                ctx.send(msg + b"-ack")
+            while not stop_event.is_set():
+                try:
+                    msg = ctx.recv()
+                    ctx.send(msg + b"-ack")
+                except pynng.Timeout:
+                    pass
 
         def req_worker(ctx, worker_id):
             for i in range(n_requests_per_ctx):
@@ -100,5 +108,9 @@ def test_concurrent_context_state_machines():
 
         for t in rep_threads + req_threads:
             t.start()
-        for t in req_threads + rep_threads:
+        for t in req_threads:
             t.join()
+        stop_event.set()
+        for t in rep_threads:
+            t.join()
+

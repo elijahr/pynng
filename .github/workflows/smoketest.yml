@@ -125,7 +125,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.13t', '3.14t']
+        # Note: Upstream CFFI explicitly requires Python 3.14+ for free-threaded builds:
+        # "RuntimeError: CFFI does not support the free-threaded build of CPython 3.13. Upgrade to free-threaded 3.14 or newer"
+        python-version: ['3.14t']
     name: "Free-threaded: Python ${{ matrix.python-version }}"
     steps:
       - uses: actions/checkout@v6
