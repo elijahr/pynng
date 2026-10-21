@@ -302,3 +302,16 @@ def test_v2_pipe_scheme():
         assert p0.scheme == "inproc"
         assert p1.scheme == "inproc"
 
+
+def test_v2_send_buffer_protocol():
+    """Verify v2 Socket.send accepts bytearray and memoryview."""
+    addr = random_addr()
+    with v2.Pair0(listen=addr, recv_timeout=FAST_TIMEOUT) as s0, v2.Pair0(
+        dial=addr, recv_timeout=FAST_TIMEOUT
+    ) as s1:
+        s1.send(bytearray(b"bytearray test"))
+        assert s0.recv() == b"bytearray test"
+        s1.send(memoryview(b"memoryview test"))
+        assert s0.recv() == b"memoryview test"
+
+

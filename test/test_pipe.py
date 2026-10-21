@@ -470,3 +470,40 @@ def test_v2_nng_pipe_cb_invalid_handle_safe(caplog):
     with caplog.at_level(logging.INFO):
         _nng_pipe_cb(ffi.NULL, lib.NNG_PIPE_EV_ADD_PRE, ffi.NULL)
     assert any("invalid handle" in record.message for record in caplog.records)
+
+
+def test_v2_pipe_cb_does_not_deadlock_on_socket_operations():
+    try:
+        import pynng.v2 as v2
+    except ImportError:
+        pytest.skip("v2 extension not available")
+    addr = random_addr()
+    cb_called = False
+    with v2.Pair0(listen=addr) as s0, v2.Pair0() as s1:
+        def cb(pipe):
+            nonlocal cb_called
+            cb_called = True
+            # Modifying callbacks or querying pipes from within callback
+            # must not deadlock (verifies lock was released before callback invocation)
+            s0.add_post_pipe_connect_cb(lambda p: None)
+            _ = s0.pipes
+
+        s0.add_post_pipe_connect_cb(cb)
+        s1.dial(addr)
+        later = time.time() + 5.0
+        while later > time.time():
+            if cb_called:
+                break
+            time.sleep(0.001)
+        assert cb_called
+
+
+def test_nng_pipe_cb_unregistered_handle_pointer_safe(caplog):
+    import logging
+    from pynng.nng import _nng_pipe_cb, ffi, lib
+    # Passing an arbitrary unregistered pointer address should be safely ignored
+    fake_ptr = ffi.cast("void *", 0xDEADBEEF)
+    with caplog.at_level(logging.INFO):
+        _nng_pipe_cb(ffi.NULL, lib.NNG_PIPE_EV_ADD_PRE, fake_ptr)
+    assert any("invalid handle" in record.message for record in caplog.records)
+

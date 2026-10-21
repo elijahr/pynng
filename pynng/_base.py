@@ -553,10 +553,12 @@ class Socket:
 
         handle = _ffi.new_handle(self)
         self._handle = handle
+        handle_ptr = int(_ffi.cast("uintptr_t", handle))
         version_tag = self._version_tag
         sock_id = _lib.nng_socket_id(self.socket)
         with _active_handles_lock:
             _active_handles[(version_tag, sock_id)] = weakref.ref(self)
+            _active_handles[handle_ptr] = weakref.ref(self)
 
         for event in (
             _lib.NNG_PIPE_EV_ADD_PRE,
@@ -666,6 +668,11 @@ class Socket:
             ref = _active_handles.get(key)
             if ref is not None and (ref() is self or ref() is None):
                 del _active_handles[key]
+            if hasattr(self, "_handle") and self._handle:
+                handle_ptr = int(self._ffi.cast("uintptr_t", self._handle))
+                h_ref = _active_handles.get(handle_ptr)
+                if h_ref is not None and (h_ref() is self or h_ref() is None):
+                    del _active_handles[handle_ptr]
         self._listeners = {}
         self._dialers = {}
 
@@ -1302,6 +1309,7 @@ class Context:
 
     def send_msg(self, msg):
         """Synchronously send the :class:`Message` ``msg`` on the context."""
+        ctx = self.context
         _ffi = self._ffi
         _lib = self._lib
         from .exceptions import check_err
@@ -1313,8 +1321,8 @@ class Context:
             aio = aio_p[0]
             try:
                 check_err(_lib.nng_aio_set_msg(aio, msg._nng_msg))
-                check_err(_lib.nng_ctx_send(self.context, aio))
                 msg._mem_freed = True
+                check_err(_lib.nng_ctx_send(ctx, aio))
                 check_err(_lib.nng_aio_wait(aio))
                 check_err(_lib.nng_aio_result(aio))
             finally:
@@ -1376,14 +1384,17 @@ class Context:
     @property
     def context(self):
         """Return the underlying nng object."""
+        if self._context is None:
+            from .exceptions import Closed
+            raise Closed("Context closed", 2)
         return self._context[0]
 
     def __del__(self):
-        if _is_nng_finalized():
-            return
         try:
+            if _is_nng_finalized():
+                return
             self.close()
-        except (TypeError, AttributeError, NNGException):
+        except (TypeError, AttributeError, ImportError, NNGException):
             pass
 
     async def asend_msg(self, msg):
