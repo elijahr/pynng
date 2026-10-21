@@ -155,8 +155,6 @@ def _sliced_aio_recv(recv_fn, target_handle, lib, ffi, timeout_ms, slice_ms=_REC
             if err == lib.NNG_ETIMEDOUT:
                 if deadline is not None and time.monotonic() >= deadline:
                     check_err(lib.NNG_ETIMEDOUT, lib=lib, ffi=ffi)
-                if cur_slice > 10 and elapsed_slice < (cur_slice * 0.8) / 1000.0:
-                    check_err(lib.NNG_ETIMEDOUT, lib=lib, ffi=ffi)
                 continue
 
             check_err(err, lib=lib, ffi=ffi)
@@ -211,7 +209,7 @@ def _do_callbacks(pipe, callbacks):
         try:
             cb(pipe)
         except Exception:
-            msg = "Exception raised in pre pipe connect callback {!r}"
+            msg = "Exception raised in pipe callback {!r}"
             logger.exception(msg.format(cb))
 
 

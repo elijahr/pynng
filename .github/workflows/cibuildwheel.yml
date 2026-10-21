@@ -9,10 +9,8 @@ on:
     paths:
       - 'pynng/**'
       - 'build_pynng.py'
-      - 'preprocess.py'
       - 'pyproject.toml'
       - 'CMakeLists.txt'
-      - 'stubs/**'
       - 'patches/**'
       - '.github/workflows/cibuildwheel.yml'
   pull_request:
@@ -20,10 +18,8 @@ on:
     paths:
       - 'pynng/**'
       - 'build_pynng.py'
-      - 'preprocess.py'
       - 'pyproject.toml'
       - 'CMakeLists.txt'
-      - 'stubs/**'
       - 'patches/**'
       - '.github/workflows/cibuildwheel.yml'
   release:

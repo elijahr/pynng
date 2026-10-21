@@ -12,7 +12,7 @@ import warnings
 import sniffio
 
 import pynng
-from .exceptions import Closed
+from .exceptions import Closed, BadState
 
 
 logger = logging.getLogger(__name__)
@@ -106,11 +106,20 @@ class Rep0Service:
             underlying socket.  ``None`` means no timeout.
     """
 
-    def __init__(self, address, *, workers=4, recv_timeout=None, send_timeout=None):
+    def __init__(
+        self,
+        address,
+        *,
+        workers=4,
+        recv_timeout=None,
+        send_timeout=None,
+        socket_cls=None,
+    ):
         self._address = address
         self._workers = workers
         self._recv_timeout = recv_timeout
         self._send_timeout = send_timeout
+        self._socket_cls = socket_cls or pynng.Rep0
         self._socket = None
         self._contexts = []
         self._queue = None
@@ -125,7 +134,7 @@ class Rep0Service:
         if self._send_timeout is not None:
             kwargs["send_timeout"] = self._send_timeout
 
-        self._socket = pynng.Rep0(listen=self._address, **kwargs)
+        self._socket = self._socket_cls(listen=self._address, **kwargs)
 
         try:
             try:
@@ -163,11 +172,27 @@ class Rep0Service:
             try:
                 data = await ctx.arecv()
                 replied_event = asyncio.Event()
-                await self._queue.put(Request(data, ctx, _replied_event=replied_event))
+                req = Request(data, ctx, _replied_event=replied_event)
+                await self._queue.put(req)
                 # REP protocol requires reply before next receive on this context.
                 await replied_event.wait()
+                if not req._replied:
+                    # User dropped request without replying. Reset the context to clear NNG_ESTATE.
+                    try:
+                        ctx.close()
+                    except Exception:
+                        pass
+                    ctx = self._socket.new_context()
             except Closed:
                 break
+            except BadState:
+                if not self._running:
+                    break
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+                ctx = self._socket.new_context()
             except Exception:
                 if not self._running:
                     break
@@ -197,10 +222,25 @@ class Rep0Service:
             try:
                 data = await ctx.arecv()
                 replied_event = trio.Event()
-                await self._trio_send_channel.send(Request(data, ctx, _replied_event=replied_event))
+                req = Request(data, ctx, _replied_event=replied_event)
+                await self._trio_send_channel.send(req)
                 await replied_event.wait()
+                if not req._replied:
+                    try:
+                        ctx.close()
+                    except Exception:
+                        pass
+                    ctx = self._socket.new_context()
             except Closed:
                 break
+            except BadState:
+                if not self._running:
+                    break
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+                ctx = self._socket.new_context()
             except Exception:
                 if not self._running:
                     break

@@ -133,9 +133,29 @@ from pynng.exceptions import (  # noqa: F401, E402
     MessageStateError,
 )
 
-# Import service classes (optional / decoupled)
 try:
-    from pynng.service import Rep0Service, Request  # noqa: F401, E402
+    import pynng.service as _service
+    Request = _service.Request  # noqa: F401
+
+    class Rep0Service(_service.Rep0Service):
+        """v2 Rep0Service that uses v2 Rep0 sockets."""
+
+        def __init__(
+            self,
+            address,
+            *,
+            workers=4,
+            recv_timeout=None,
+            send_timeout=None,
+            socket_cls=None,
+        ):
+            super().__init__(
+                address,
+                workers=workers,
+                recv_timeout=recv_timeout,
+                send_timeout=send_timeout,
+                socket_cls=socket_cls or Rep0,
+            )
 except ImportError:
     pass
 

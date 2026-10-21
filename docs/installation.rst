@@ -89,16 +89,14 @@ Multiple options can be combined:
 Troubleshooting
 ---------------
 
-macOS: ``llvm-ranlib`` error
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+macOS: ``llvm-ranlib`` / Mach-O Archive Error
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If the build fails with an error related to ``llvm-ranlib``, you may need to
-install LLVM via Homebrew and configure your path:
+If building on macOS fails with an archive format error (e.g. ``archive member '/' not a mach-o file``), Homebrew LLVM's ``ranlib`` may be taking precedence over Apple's native toolchain. Ensure Apple's native ``ranlib`` is used:
 
 .. code-block:: bash
 
-   brew install llvm
-   export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+   pip install --no-build-isolation -Ccmake.define.CMAKE_RANLIB=/usr/bin/ranlib -e .
 
 Linux: ``libclang`` not found
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

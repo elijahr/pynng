@@ -307,8 +307,10 @@ async def test_listener_async_context_manager_trio():
     addr = random_addr()
     with pynng.Pair0() as sock:
         async with sock.listen(addr) as listener:
-            assert listener is not None
+            assert isinstance(listener, pynng.Listener)
+            assert listener.id in sock._listeners
         # after exiting async with, listener is closed
+        assert listener.id not in sock._listeners
 
 
 @pytest.mark.trio
@@ -354,7 +356,9 @@ async def test_listener_async_context_manager_asyncio():
     addr = random_addr()
     with pynng.Pair0() as sock:
         async with sock.listen(addr) as listener:
-            assert listener is not None
+            assert isinstance(listener, pynng.Listener)
+            assert listener.id in sock._listeners
+        assert listener.id not in sock._listeners
 
 
 @pytest.mark.asyncio
