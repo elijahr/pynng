@@ -61,14 +61,19 @@ jobs:
       - name: Build and Benchmark Base Branch
         run: |
           BASE_REF="${{ github.base_ref || 'master' }}"
-          # If this is a direct push to master, compare against previous commit (HEAD~1)
+          TARGET_REF=""
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "$BASE_REF" ]; then
-            BASE_REF="HEAD~1"
+            TARGET_REF="HEAD~1"
+          elif git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
+            TARGET_REF="$BASE_REF"
+          elif git rev-parse --verify "origin/$BASE_REF" >/dev/null 2>&1; then
+            TARGET_REF="origin/$BASE_REF"
           fi
-          echo "Comparing against base ref: $BASE_REF"
-          if git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
+
+          if [ -n "$TARGET_REF" ]; then
+            echo "Checking out target base ref: $TARGET_REF"
             rm -rf dist/ build/
-            git checkout "$BASE_REF"
+            git checkout "$TARGET_REF"
             uv build --wheel -o dist/
             uv pip install --system --reinstall dist/*.whl
             python /tmp/bench_harness/bench.py -n 10000 --json base_bench.json
