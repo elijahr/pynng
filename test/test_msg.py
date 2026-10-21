@@ -307,3 +307,17 @@ def test_recv_zero_byte_pushpull0():
             pytest.fail("Pull did not receive 0-byte message with block=False")
         assert recvd_nb == b""
         assert len(recvd_nb) == 0
+
+
+def test_context_send_msg_error_does_not_double_free():
+    """Verify that if nng_ctx_send fails after aio_set_msg, msg._mem_freed is True so __del__ does not double-free."""
+    addr = random_addr()
+    with pynng.Rep0(listen=addr) as rep:
+        ctx = rep.new_context()
+        msg = pynng.Message(b"cannot send reply before receiving request")
+        with pytest.raises(pynng.BadState):
+            ctx.send_msg(msg)
+        assert msg._mem_freed is True
+        # Explicit del should not raise or double-free in NNG
+        del msg
+

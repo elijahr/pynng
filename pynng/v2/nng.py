@@ -149,7 +149,11 @@ class Socket(_base.Socket):
         flags = 0
         if not block:
             flags |= lib.NNG_FLAG_NONBLOCK
-        err = lib.nng_send(self.socket, data, len(data), flags)
+        if isinstance(data, bytes):
+            c_buf = data
+        else:
+            c_buf = ffi.from_buffer(data)
+        err = lib.nng_send(self.socket, c_buf, len(data), flags)
         check_err(err)
 
     async def arecv(self):

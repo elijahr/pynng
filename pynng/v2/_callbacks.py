@@ -52,31 +52,52 @@ def _nng_pipe_cb(lib_pipe, event, arg):
     """
     logger.debug("v2 pipe callback event {}".format(event))
 
-    try:
-        sock = ffi.from_handle(arg)
-    except (RuntimeError, ValueError, ffi.error):
+    if arg == ffi.NULL:
         logger.info(
             "v2 pipe callback fired with invalid handle (socket likely GC'd); ignoring"
         )
         return
 
+    arg_ptr = int(ffi.cast("uintptr_t", arg))
+    with _active_handles_lock:
+        ref = _active_handles.get(arg_ptr)
+        sock = ref() if ref is not None else None
+
+    if sock is None:
+        logger.info(
+            "v2 pipe callback fired with invalid handle (socket likely GC'd); ignoring"
+        )
+        return
+
+    # Snapshot callbacks under lock, then invoke outside lock to prevent deadlock
+    callbacks = None
+    pipe = None
+    remove_pipe_on_finally = False
+
     with sock._pipe_notify_lock:
         pipe_id = lib.nng_pipe_id(lib_pipe)
         if event == lib.NNG_PIPE_EV_ADD_PRE:
             pipe = sock._add_pipe(lib_pipe)
-            _do_callbacks(pipe, sock._on_pre_pipe_add)
-            if pipe.closed:
-                sock._remove_pipe(lib_pipe)
+            callbacks = list(sock._on_pre_pipe_add)
         elif event == lib.NNG_PIPE_EV_ADD_POST:
             pipe = sock._add_pipe(lib_pipe)
-            _do_callbacks(pipe, sock._on_post_pipe_add)
+            callbacks = list(sock._on_post_pipe_add)
         elif event == lib.NNG_PIPE_EV_REM_POST:
             try:
                 pipe = sock._pipes[pipe_id]
             except KeyError:
                 logger.debug("Could not find pipe for v2 socket")
                 return
-            try:
-                _do_callbacks(pipe, sock._on_post_pipe_remove)
-            finally:
+            callbacks = list(sock._on_post_pipe_remove)
+            remove_pipe_on_finally = True
+
+    try:
+        if callbacks and pipe:
+            _do_callbacks(pipe, callbacks)
+    finally:
+        if remove_pipe_on_finally:
+            with sock._pipe_notify_lock:
+                sock._remove_pipe(lib_pipe)
+        elif event == lib.NNG_PIPE_EV_ADD_PRE and pipe and pipe.closed:
+            with sock._pipe_notify_lock:
                 sock._remove_pipe(lib_pipe)
