@@ -8,21 +8,17 @@ on:
     paths:
       - 'pynng/**'
       - 'build_pynng.py'
-      - 'preprocess.py'
       - 'test/**'
       - 'pyproject.toml'
       - 'CMakeLists.txt'
-      - 'stubs/**'
       - '.github/workflows/smoketest.yml'
   pull_request:
     paths:
       - 'pynng/**'
       - 'build_pynng.py'
-      - 'preprocess.py'
       - 'test/**'
       - 'pyproject.toml'
       - 'CMakeLists.txt'
-      - 'stubs/**'
       - '.github/workflows/smoketest.yml'
 
 concurrency:

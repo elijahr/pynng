@@ -216,12 +216,16 @@ async def test_double_reply_raises_asyncio():
 
 def test_unreplied_request_warns():
     """A Request that goes out of scope without reply emits ResourceWarning."""
+    import gc
+
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         r = Request(b"test-data", None)
         del r
-        # ResourceWarning may or may not fire depending on GC timing,
-        # so we just verify the class works without errors.
+        gc.collect()
+        assert len(w) == 1
+        assert issubclass(w[0].category, ResourceWarning)
+        assert "was never replied to" in str(w[0].message)
 
 
 # ---------------------------------------------------------------------------

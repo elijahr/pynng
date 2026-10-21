@@ -345,9 +345,11 @@ class Surveyor0(Socket):
         Returns:
             list[bytes]: All responses received before timeout.
         """
-        old_timeout = self.recv_timeout
+        old_recv_timeout = self.recv_timeout
+        old_survey_time = self.survey_time
         if timeout is not None:
             self.recv_timeout = timeout
+            self.survey_time = timeout
 
         try:
             await self.asend(data)
@@ -362,7 +364,12 @@ class Surveyor0(Socket):
                     break
             return responses
         finally:
-            self.recv_timeout = old_timeout
+            try:
+                if timeout is not None:
+                    self.recv_timeout = old_recv_timeout
+                    self.survey_time = old_survey_time
+            except Closed:
+                pass
 
 
 class Respondent0(Socket):
