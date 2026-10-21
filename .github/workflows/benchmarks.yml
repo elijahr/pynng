@@ -45,10 +45,6 @@ jobs:
           sudo apt update
           sudo apt install -y ninja-build libclang-dev
 
-      - name: Install Python build tools
-        run: |
-          uv pip install --system cffi setuptools
-
       - name: Stage benchmark harness
         run: |
           mkdir -p /tmp/bench_harness
@@ -57,7 +53,8 @@ jobs:
       # Step 1: Benchmark current branch
       - name: Build and Benchmark Current Branch
         run: |
-          uv pip install --system -e . --no-build-isolation
+          uv build --wheel -o dist/
+          uv pip install --system --reinstall dist/*.whl
           python /tmp/bench_harness/bench.py -n 10000 --json current_bench.json
 
       # Step 2: Checkout base branch and benchmark on the EXACT same VM
@@ -70,8 +67,10 @@ jobs:
           fi
           echo "Comparing against base ref: $BASE_REF"
           if git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
+            rm -rf dist/ build/
             git checkout "$BASE_REF"
-            uv pip install --system -e . --no-build-isolation
+            uv build --wheel -o dist/
+            uv pip install --system --reinstall dist/*.whl
             python /tmp/bench_harness/bench.py -n 10000 --json base_bench.json
           else
             echo "Base ref $BASE_REF not found; skipping comparison."
