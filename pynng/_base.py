@@ -201,7 +201,7 @@ def _do_callbacks(pipe, callbacks):
         try:
             cb(pipe)
         except Exception:
-            msg = "Exception raised in pre pipe connect callback {!r}"
+            msg = "Exception raised in pipe callback {!r}"
             logger.exception(msg.format(cb))
 
 
@@ -221,14 +221,17 @@ def _handle_pipe_event(sock, lib_pipe, event, lib):
     2. Removed pipe IDs are recorded in ``sock._removed_pipes`` so a delayed
        ``ADD_PRE`` or ``ADD_POST`` never re-inserts a removed pipe into
        ``sock._pipes``.
-    3. If ``REM_POST`` overtakes ``ADD_POST`` after ``ADD_PRE`` succeeded
-       without rejection, ``_on_post_pipe_add`` and ``_on_post_pipe_remove``
-       are still delivered in causal order while leaving the pipe removed.
+    3. If ``REM_POST`` arrives while a pipe is still in ``_pre_pipes``, it may
+       either be a protocol rejection in ``pipe_start`` (where ``ADD_POST``
+       will never fire) or an overtaken ``ADD_POST``. ``REM_POST`` records the
+       removal without firing ``post_add``/``post_remove``; if ``ADD_POST``
+       subsequently arrives (proving ``pipe_start`` succeeded), ``ADD_POST``
+       delivers ``_on_post_pipe_add`` and ``_on_post_pipe_remove`` in causal
+       order without re-adding the pipe to ``sock._pipes``.
     """
     callbacks = None
     post_remove_callbacks = None
     pipe = None
-    remove_pipe_on_finally = False
     pipe_id = lib.nng_pipe_id(lib_pipe)
 
     with sock._pipe_notify_lock:
@@ -240,35 +243,38 @@ def _handle_pipe_event(sock, lib_pipe, event, lib):
             pipe = sock._get_or_create_pre_pipe(lib_pipe)
             callbacks = list(sock._on_pre_pipe_add)
         elif event == lib.NNG_PIPE_EV_ADD_POST:
+            sock._pre_pipes.pop(pipe_id, None)
             if pipe_id in sock._removed_pipes:
-                sock._pre_pipes.pop(pipe_id, None)
                 sock._pipes.pop(pipe_id, None)
-                return
-            pipe = sock._pre_pipes.pop(pipe_id, None)
-            if pipe is None:
+                removed_pipe = sock._removed_pipes.get(pipe_id)
+                if (
+                    removed_pipe is not None
+                    and removed_pipe._pre_add_completed
+                    and not removed_pipe.closed
+                ):
+                    pipe = removed_pipe
+                    callbacks = list(sock._on_post_pipe_add)
+                    post_remove_callbacks = list(sock._on_post_pipe_remove)
+            else:
                 pipe = sock._pipes.get(pipe_id)
-            if pipe is None:
-                pipe_cls = sock._pipe_class or Pipe
-                pipe = pipe_cls(lib_pipe, sock)
-            if pipe.closed:
-                sock._pipes.pop(pipe_id, None)
-                sock._mark_pipe_removed(pipe_id, pipe)
-                return
-            sock._pipes[pipe_id] = pipe
-            callbacks = list(sock._on_post_pipe_add)
+                if pipe is None:
+                    pipe_cls = sock._pipe_class or Pipe
+                    pipe = pipe_cls(lib_pipe, sock)
+                if pipe.closed:
+                    sock._pipes.pop(pipe_id, None)
+                    sock._mark_pipe_removed(pipe_id, pipe)
+                    return
+                sock._pipes[pipe_id] = pipe
+                callbacks = list(sock._on_post_pipe_add)
         elif event == lib.NNG_PIPE_EV_REM_POST:
-            pipe = sock._pipes.get(pipe_id)
+            pipe = sock._pipes.pop(pipe_id, None)
             pre_pipe = sock._pre_pipes.pop(pipe_id, None)
             if pipe is not None:
                 sock._mark_pipe_removed(pipe_id, pipe)
                 callbacks = list(sock._on_post_pipe_remove)
-                remove_pipe_on_finally = True
             elif pre_pipe is not None:
                 sock._mark_pipe_removed(pipe_id, pre_pipe)
-                if pre_pipe._pre_add_completed and not pre_pipe.closed:
-                    pipe = pre_pipe
-                    callbacks = list(sock._on_post_pipe_add)
-                    post_remove_callbacks = list(sock._on_post_pipe_remove)
+                return
             else:
                 sock._mark_pipe_removed(pipe_id, None)
                 logger.debug("Could not find pipe for socket")
@@ -280,10 +286,7 @@ def _handle_pipe_event(sock, lib_pipe, event, lib):
         if post_remove_callbacks and pipe:
             _do_callbacks(pipe, post_remove_callbacks)
     finally:
-        if remove_pipe_on_finally:
-            with sock._pipe_notify_lock:
-                sock._remove_pipe(lib_pipe)
-        elif event == lib.NNG_PIPE_EV_ADD_PRE and pipe is not None:
+        if event == lib.NNG_PIPE_EV_ADD_PRE and pipe is not None:
             with sock._pipe_notify_lock:
                 if pipe.closed or pipe_id in sock._removed_pipes:
                     sock._pre_pipes.pop(pipe_id, None)
@@ -764,6 +767,7 @@ class Socket:
         with self._pipe_notify_lock:
             self._pipes.clear()
             self._pre_pipes.clear()
+            self._removed_pipes.clear()
         while self._recv_pool:
             self._recv_pool.pop()._free()
         while self._send_pool:
@@ -1187,7 +1191,8 @@ class Socket:
                     self._removed_pipes[pipe_id] = removed_pipe
                 msg.pipe = removed_pipe
             elif pipe_id >= 0:
-                msg.pipe = self._add_pipe(lib_pipe)
+                pipe_cls = self._pipe_class or Pipe
+                msg.pipe = pipe_cls(lib_pipe, self)
 
 
 class Dialer:

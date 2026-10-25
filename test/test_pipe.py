@@ -474,8 +474,10 @@ def test_v2_nng_pipe_cb_invalid_handle_safe(caplog):
 
 def test_pipe_cb_out_of_order_rem_post_before_add_post():
     """If NNG_PIPE_EV_REM_POST overtakes NNG_PIPE_EV_ADD_POST on the reaper
-    thread, the pipe must not be re-added to sock.pipes by the delayed ADD_POST,
-    and post_add/post_remove callbacks must still fire in causal order.
+    thread, REM_POST alone must not synthesize post_add (since pipe_start may
+    have rejected the pipe), and when ADD_POST subsequently arrives (proving
+    pipe_start succeeded), post_add/post_remove fire in causal order while
+    leaving sock.pipes empty.
     """
     from pynng.nng import _nng_pipe_cb, ffi, lib
 
@@ -495,16 +497,15 @@ def test_pipe_cb_out_of_order_rem_post_before_add_post():
         assert events == [("pre_add", 0x123456)]
 
         # 2. Reaper thread fires REM_POST before endpoint thread fires ADD_POST.
+        # If pipe_start rejected the pipe, ADD_POST will never arrive, so
+        # REM_POST must not synthesize post_add or remove callbacks.
         _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_REM_POST, s0._handle)
         assert len(s0.pipes) == 0
-        assert events == [
-            ("pre_add", 0x123456),
-            ("post_add", 0x123456),
-            ("remove", 0x123456),
-        ]
+        assert events == [("pre_add", 0x123456)]
 
-        # 3. Delayed ADD_POST arrives on endpoint thread; must not re-add the
-        # removed pipe or re-fire post_add callbacks.
+        # 3. Delayed ADD_POST arrives on endpoint thread (proving pipe_start
+        # succeeded); delivers post_add and remove in causal order without
+        # re-adding the removed pipe to s0.pipes.
         _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_ADD_POST, s0._handle)
         assert len(s0.pipes) == 0
         assert events == [
@@ -529,4 +530,82 @@ def test_pipe_cb_out_of_order_rem_post_before_add_pre():
         _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_ADD_POST, s0._handle)
 
         assert len(s0.pipes) == 0
+
+
+def test_pair0_rejected_second_dialer_does_not_fire_post_add():
+    """When a second Pair0 dialer connects to an already-paired Pair0 listener,
+    nng rejects the second pipe in pair0_pipe_start (firing ADD_PRE then
+    REM_POST without ADD_POST). Neither post_pipe_connect nor post_pipe_remove
+    may fire for the rejected pipe.
+    """
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as s0:
+        with pynng.Pair0(dial=addr) as s1:
+            wait_pipe_len(s0, 1)
+            wait_pipe_len(s1, 1)
+            active_pipe_id = s0.pipes[0].id
+
+            pre_added = []
+            post_added = []
+            post_removed = []
+            s0.add_pre_pipe_connect_cb(lambda p: pre_added.append(p.id))
+            s0.add_post_pipe_connect_cb(lambda p: post_added.append(p.id))
+            s0.add_post_pipe_remove_cb(lambda p: post_removed.append(p.id))
+
+            with pynng.Pair0(dial=addr, block_on_dial=False) as _s2:
+                deadline = time.monotonic() + 2.0
+                while not pre_added and time.monotonic() < deadline:
+                    time.sleep(0.005)
+                # Give reaper thread time to process REM_POST for rejected pipe
+                time.sleep(0.05)
+
+            assert len(pre_added) >= 1
+            assert post_added == []
+            assert post_removed == []
+            assert [p.id for p in s0.pipes] == [active_pipe_id]
+
+
+def test_post_pipe_remove_cb_sees_pipe_already_removed():
+    """Inside post_pipe_remove_cb, the removed pipe is no longer in sock.pipes."""
+    addr = random_addr()
+    pipes_during_remove = []
+    with pynng.Pair0(listen=addr) as s0, pynng.Pair0() as s1:
+        s0.add_post_pipe_remove_cb(lambda p: pipes_during_remove.append(len(s0.pipes)))
+        s1.dial(addr)
+        wait_pipe_len(s0, 1)
+        wait_pipe_len(s1, 1)
+        s1.close()
+        wait_pipe_len(s0, 0)
+        assert pipes_during_remove == [0]
+
+
+def test_v2_pipe_cb_out_of_order_rem_post_before_add_post():
+    """Verify v2 _nng_pipe_cb also handles out-of-order REM_POST before ADD_POST."""
+    try:
+        from pynng.v2._callbacks import _nng_pipe_cb
+        from pynng._nng_v2 import ffi, lib
+        import pynng.v2 as v2
+    except ImportError:
+        pytest.skip("v2 extension not available")
+
+    addr = random_addr()
+    with v2.Pair0(listen=addr) as s0:
+        events = []
+        s0.add_pre_pipe_connect_cb(lambda p: events.append(("pre_add", p.id)))
+        s0.add_post_pipe_connect_cb(lambda p: events.append(("post_add", p.id)))
+        s0.add_post_pipe_remove_cb(lambda p: events.append(("remove", p.id)))
+
+        fake_pipe = ffi.new("nng_pipe *", {"id": 0x234567})[0]
+        _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_ADD_PRE, s0._handle)
+        _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_REM_POST, s0._handle)
+        assert len(s0.pipes) == 0
+        assert events == [("pre_add", 0x234567)]
+
+        _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_ADD_POST, s0._handle)
+        assert len(s0.pipes) == 0
+        assert events == [
+            ("pre_add", 0x234567),
+            ("post_add", 0x234567),
+            ("remove", 0x234567),
+        ]
 
