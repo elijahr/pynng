@@ -470,3 +470,63 @@ def test_v2_nng_pipe_cb_invalid_handle_safe(caplog):
     with caplog.at_level(logging.INFO):
         _nng_pipe_cb(ffi.NULL, lib.NNG_PIPE_EV_ADD_PRE, ffi.NULL)
     assert any("invalid handle" in record.message for record in caplog.records)
+
+
+def test_pipe_cb_out_of_order_rem_post_before_add_post():
+    """If NNG_PIPE_EV_REM_POST overtakes NNG_PIPE_EV_ADD_POST on the reaper
+    thread, the pipe must not be re-added to sock.pipes by the delayed ADD_POST,
+    and post_add/post_remove callbacks must still fire in causal order.
+    """
+    from pynng.nng import _nng_pipe_cb, ffi, lib
+
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as s0:
+        events = []
+        s0.add_pre_pipe_connect_cb(lambda p: events.append(("pre_add", p.id)))
+        s0.add_post_pipe_connect_cb(lambda p: events.append(("post_add", p.id)))
+        s0.add_post_pipe_remove_cb(lambda p: events.append(("remove", p.id)))
+
+        fake_pipe = ffi.new("nng_pipe *", {"id": 0x123456})[0]
+
+        # 1. ADD_PRE fires on endpoint thread; pipe is staged in _pre_pipes,
+        # not yet exposed in s0.pipes (before pipe_start completes).
+        _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_ADD_PRE, s0._handle)
+        assert len(s0.pipes) == 0
+        assert events == [("pre_add", 0x123456)]
+
+        # 2. Reaper thread fires REM_POST before endpoint thread fires ADD_POST.
+        _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_REM_POST, s0._handle)
+        assert len(s0.pipes) == 0
+        assert events == [
+            ("pre_add", 0x123456),
+            ("post_add", 0x123456),
+            ("remove", 0x123456),
+        ]
+
+        # 3. Delayed ADD_POST arrives on endpoint thread; must not re-add the
+        # removed pipe or re-fire post_add callbacks.
+        _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_ADD_POST, s0._handle)
+        assert len(s0.pipes) == 0
+        assert events == [
+            ("pre_add", 0x123456),
+            ("post_add", 0x123456),
+            ("remove", 0x123456),
+        ]
+
+
+def test_pipe_cb_out_of_order_rem_post_before_add_pre():
+    """If NNG_PIPE_EV_REM_POST acquires _pipe_notify_lock before ADD_PRE,
+    subsequent ADD_PRE and ADD_POST must not strand the pipe in sock.pipes.
+    """
+    from pynng.nng import _nng_pipe_cb, ffi, lib
+
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as s0:
+        fake_pipe = ffi.new("nng_pipe *", {"id": 0x654321})[0]
+
+        _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_REM_POST, s0._handle)
+        _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_ADD_PRE, s0._handle)
+        _nng_pipe_cb(fake_pipe, lib.NNG_PIPE_EV_ADD_POST, s0._handle)
+
+        assert len(s0.pipes) == 0
+

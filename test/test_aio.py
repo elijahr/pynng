@@ -123,7 +123,7 @@ async def test_pub_sub_trio():
         return i % 2 == 0
 
     async def pub():
-        with pynng.Pub0(listen=addr) as pubber:
+        with pynng.Pub0(listen=addr, send_buffer_size=128) as pubber:
             # Wait until both subscribers have connected before publishing.
             # inproc is reliable but messages sent before subscription is
             # established are dropped.
@@ -136,9 +136,11 @@ async def test_pub_sub_trio():
                 await pubber.asend(msg.encode("ascii"))
 
             while not all(sentinel_received.values()):
-                # signal completion
+                # signal completion (throttle so sentinel broadcasts do not
+                # overflow Pub0's per-pipe send queue and evict data messages)
                 await pubber.asend(b"odd:None")
                 await pubber.asend(b"even:None")
+                await trio.sleep(0.005)
 
     async def subs(which):
         if which == "even":
@@ -146,9 +148,9 @@ async def test_pub_sub_trio():
         else:
             expected_values = list(range(1, 20, 2))  # [1, 3, 5, ..., 19]
 
-        with pynng.Sub0(dial=addr, recv_timeout=SLOW_TIMEOUT) as subber:
-            subber.subscribe(which + ":")
-
+        with pynng.Sub0(
+            dial=addr, topics=which + ":", recv_timeout=SLOW_TIMEOUT
+        ) as subber:
             received_values = []
             while True:
                 val = await subber.arecv()

@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Modernize GitHub Actions workflows to Node 24-compatible actions
 
 ### Fixed
+- Prevent pipe notification race where `NNG_PIPE_EV_REM_POST` on the `nng` reaper thread overtakes `NNG_PIPE_EV_ADD_POST` (or `NNG_PIPE_EV_ADD_PRE`) and leaves removed pipes stranded in `Socket.pipes`, and ensure `Sub0`, `Req0`, and `Surveyor0` apply protocol options (`topics`, `resend_time`, `survey_time`) before `listen`/`dial`
 - Fix #108: Prevent process crash / NNG panic during Python interpreter shutdown by disabling unconditional `nng_fini()` at atexit (`nng_fini_at_exit = False`) and guarding `Socket`, `Context`, `Message`, `AIOHelper`, and `DeviceAIO` finalizers against calling deallocated NNG C state during GC
 - Fix #113: Prevent hard C aborts (`panic: nng is not fork-reentrant safe`) in forked child processes by detecting `fork()` and raising a descriptive Python `RuntimeError` directing users to `multiprocessing.set_start_method('spawn')`
 - Fix #104: Prevent `RuntimeError: cannot use unpack() on <cdata 'char *' NULL>` when receiving 0-byte messages via v1 `Socket.recv()`

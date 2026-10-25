@@ -567,16 +567,28 @@ class Sub0(Socket):
     _raw_opener = lib.nng_sub0_open_raw
 
     def __init__(self, *, topics=None, raw=False, **kwargs):
-        super().__init__(raw=raw, **kwargs)
+        listen = kwargs.pop("listen", None)
+        dial = kwargs.pop("dial", None)
+        block_on_dial = kwargs.pop("block_on_dial", None)
+        super().__init__(
+            raw=raw,
+            listen=None,
+            dial=None,
+            block_on_dial=block_on_dial,
+            **kwargs,
+        )
         self._subscriptions = set()
         self._sub_lock = threading.RLock()
-        if topics is None:
-            return
-        # special-case str/bytes
-        if isinstance(topics, (str, bytes)):
-            topics = [topics]
-        for topic in topics:
-            self.subscribe(topic)
+        if topics is not None:
+            # special-case str/bytes
+            if isinstance(topics, (str, bytes)):
+                topics = [topics]
+            for topic in topics:
+                self.subscribe(topic)
+        if listen is not None:
+            self.listen(listen)
+        if dial is not None:
+            self.dial(dial, block=block_on_dial)
 
     @property
     def subscriptions(self):
@@ -676,9 +688,22 @@ class Req0(Socket):
     _raw_opener = lib.nng_req0_open_raw
 
     def __init__(self, *, resend_time=None, raw=False, **kwargs):
-        super().__init__(raw=raw, **kwargs)
+        listen = kwargs.pop("listen", None)
+        dial = kwargs.pop("dial", None)
+        block_on_dial = kwargs.pop("block_on_dial", None)
+        super().__init__(
+            raw=raw,
+            listen=None,
+            dial=None,
+            block_on_dial=block_on_dial,
+            **kwargs,
+        )
         if resend_time is not None:
             self.resend_time = resend_time
+        if listen is not None:
+            self.listen(listen)
+        if dial is not None:
+            self.dial(dial, block=block_on_dial)
 
 
 class Rep0(Socket):
@@ -740,9 +765,22 @@ class Surveyor0(Socket):
     survey_time = MsOption("surveyor:survey-time")
 
     def __init__(self, *, survey_time=None, raw=False, **kwargs):
-        super().__init__(raw=raw, **kwargs)
+        listen = kwargs.pop("listen", None)
+        dial = kwargs.pop("dial", None)
+        block_on_dial = kwargs.pop("block_on_dial", None)
+        super().__init__(
+            raw=raw,
+            listen=None,
+            dial=None,
+            block_on_dial=block_on_dial,
+            **kwargs,
+        )
         if survey_time is not None:
             self.survey_time = survey_time
+        if listen is not None:
+            self.listen(listen)
+        if dial is not None:
+            self.dial(dial, block=block_on_dial)
 
     async def asurvey(self, data, *, timeout=None, max_responses=None):
         """Send a survey and collect all responses until timeout.
@@ -1081,41 +1119,7 @@ def _nng_pipe_cb(lib_pipe, event, arg):
         )
         return
 
-    # exceptions don't propagate out of this function, so if any exception is
-    # raised in any of the callbacks, we just log it (using logger.exception).
-    # Snapshot callbacks under lock, then invoke outside the lock to prevent deadlock
-    # if a user callback performs socket operations or registers/unregisters callbacks.
-    callbacks = None
-    pipe = None
-    remove_pipe_on_finally = False
-
-    with sock._pipe_notify_lock:
-        pipe_id = lib.nng_pipe_id(lib_pipe)
-        if event == lib.NNG_PIPE_EV_ADD_PRE:
-            pipe = sock._add_pipe(lib_pipe)
-            callbacks = list(sock._on_pre_pipe_add)
-        elif event == lib.NNG_PIPE_EV_ADD_POST:
-            pipe = sock._add_pipe(lib_pipe)
-            callbacks = list(sock._on_post_pipe_add)
-        elif event == lib.NNG_PIPE_EV_REM_POST:
-            try:
-                pipe = sock._pipes[pipe_id]
-            except KeyError:
-                logger.debug("Could not find pipe for socket")
-                return
-            callbacks = list(sock._on_post_pipe_remove)
-            remove_pipe_on_finally = True
-
-    try:
-        if callbacks and pipe:
-            _do_callbacks(pipe, callbacks)
-    finally:
-        if remove_pipe_on_finally:
-            with sock._pipe_notify_lock:
-                sock._remove_pipe(lib_pipe)
-        elif event == lib.NNG_PIPE_EV_ADD_PRE and pipe and pipe.closed:
-            with sock._pipe_notify_lock:
-                sock._remove_pipe(lib_pipe)
+    _base._handle_pipe_event(sock, lib_pipe, event, lib)
 
 
 def device(s1, s2=None):
