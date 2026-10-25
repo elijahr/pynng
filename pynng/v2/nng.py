@@ -255,26 +255,19 @@ class Sub0(Socket):
     _opener = lib.nng_sub0_open
 
     def __init__(self, *, topics=None, **kwargs):
-        listen = kwargs.pop("listen", None)
-        dial = kwargs.pop("dial", None)
-        block_on_dial = kwargs.pop("block_on_dial", None)
-        super().__init__(
-            listen=None,
-            dial=None,
-            block_on_dial=block_on_dial,
-            **kwargs,
-        )
         self._subscriptions = set()
         self._sub_lock = threading.RLock()
+        self._init_topics = topics
+        super().__init__(**kwargs)
+
+    def _configure_protocol_options(self):
+        topics = self._init_topics
+        self._init_topics = None
         if topics is not None:
             if isinstance(topics, (str, bytes)):
                 topics = [topics]
             for topic in topics:
                 self.subscribe(topic)
-        if listen is not None:
-            self.listen(listen)
-        if dial is not None:
-            self.dial(dial, block=block_on_dial)
 
     @property
     def subscriptions(self):
@@ -338,21 +331,9 @@ class Req0(Socket):
     _opener = lib.nng_req0_open
 
     def __init__(self, *, resend_time=None, **kwargs):
-        listen = kwargs.pop("listen", None)
-        dial = kwargs.pop("dial", None)
-        block_on_dial = kwargs.pop("block_on_dial", None)
-        super().__init__(
-            listen=None,
-            dial=None,
-            block_on_dial=block_on_dial,
-            **kwargs,
-        )
+        super().__init__(**kwargs)
         if resend_time is not None:
             self.resend_time = resend_time
-        if listen is not None:
-            self.listen(listen)
-        if dial is not None:
-            self.dial(dial, block=block_on_dial)
 
 
 class Rep0(Socket):
@@ -372,21 +353,9 @@ class Surveyor0(Socket):
     survey_time = MsOption("surveyor:survey-time")
 
     def __init__(self, *, survey_time=None, **kwargs):
-        listen = kwargs.pop("listen", None)
-        dial = kwargs.pop("dial", None)
-        block_on_dial = kwargs.pop("block_on_dial", None)
-        super().__init__(
-            listen=None,
-            dial=None,
-            block_on_dial=block_on_dial,
-            **kwargs,
-        )
+        super().__init__(**kwargs)
         if survey_time is not None:
             self.survey_time = survey_time
-        if listen is not None:
-            self.listen(listen)
-        if dial is not None:
-            self.dial(dial, block=block_on_dial)
 
     async def asurvey(self, data, *, timeout=None, max_responses=None):
         """Send a survey and collect all responses until timeout.

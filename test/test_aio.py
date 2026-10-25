@@ -117,30 +117,32 @@ async def test_pub_sub_trio():
     one retrieve values and verify the parity.
     """
     addr = random_addr()
-    sentinel_received = {}
 
     def is_even(i):
         return i % 2 == 0
 
     async def pub():
-        with pynng.Pub0(listen=addr, send_buffer_size=128) as pubber:
-            # Wait until both subscribers have connected before publishing.
-            # inproc is reliable but messages sent before subscription is
-            # established are dropped.
-            while len(pubber.pipes) < 2:
-                await trio.sleep(0.01)
+        # Both subscribers set their topic before they dial, and the send
+        # buffer holds every message this test sends to a pipe, so no message
+        # can be dropped once both pipes are started.
+        with pynng.Pub0(send_buffer_size=128) as pubber:
+            async with pubber.pipe_events() as events:
+                pubber.listen(addr)
+                started = 0
+                async for event in events:
+                    if event.event_type == "post_add":
+                        started += 1
+                        if started == 2:
+                            break
 
             for i in range(20):
                 prefix = "even" if is_even(i) else "odd"
                 msg = f"{prefix}:{i}"
                 await pubber.asend(msg.encode("ascii"))
 
-            while not all(sentinel_received.values()):
-                # signal completion (throttle so sentinel broadcasts do not
-                # overflow Pub0's per-pipe send queue and evict data messages)
-                await pubber.asend(b"odd:None")
-                await pubber.asend(b"even:None")
-                await trio.sleep(0.005)
+            # signal completion
+            await pubber.asend(b"odd:None")
+            await pubber.asend(b"even:None")
 
     async def subs(which):
         if which == "even":
@@ -162,20 +164,14 @@ async def test_pub_sub_trio():
 
                 received_values.append(int(i))
 
-            # The publisher sends 20 messages (10 per parity). Since pub
-            # waits for both subscribers to connect before publishing,
-            # all 10 messages must arrive with exactly the right values.
-            assert sorted(received_values) == expected_values, (
-                f"{which} subscriber received wrong values: {sorted(received_values)!r}, "
+            assert received_values == expected_values, (
+                f"{which} subscriber received wrong values: {received_values!r}, "
                 f"expected {expected_values!r}"
             )
-            # mark subscriber as having received None sentinel
-            sentinel_received[which] = True
 
     async with trio.open_nursery() as n:
         # whip up the subs
         for _, lot in itertools.product(range(1), ("even", "odd")):
-            sentinel_received[lot] = False
             n.start_soon(subs, lot)
 
         # head over to the pub
@@ -184,7 +180,7 @@ async def test_pub_sub_trio():
 
 @pytest.mark.asyncio
 async def test_aio_free_cancels_pending():
-    from pynng._aio import AIOHelper, _aio_map, _aio_map_lock
+    from pynng._aio import AIOHelper, _aio_map
 
     addr = random_addr()
     with pynng.Pair0(listen=addr) as s0:
@@ -200,47 +196,42 @@ async def test_aio_free_cancels_pending():
         # 2. Fallback _aio_map callback path (_use_mpsc=False)
         helper = AIOHelper(s0, "asyncio", _use_mpsc=False)
         cb_id = id(helper.cb_arg)
-        with _aio_map_lock:
-            assert cb_id in _aio_map
+        assert cb_id in _aio_map
         # Explicit _free should cancel pending AIO and pop cb_arg
         helper._free()
         assert helper.aio is None
-        with _aio_map_lock:
-            assert cb_id not in _aio_map
+        assert cb_id not in _aio_map
         if helper.awaitable is not None:
             helper.awaitable.close()
 
 
 @pytest.mark.asyncio
 async def test_aio_free_cleans_map_when_aio_is_none():
-    from pynng._aio import AIOHelper, _aio_map, _aio_map_lock, lib
+    from pynng._aio import AIOHelper, _aio_map, lib
 
     addr = random_addr()
     with pynng.Pair0(listen=addr) as s0:
         helper = AIOHelper(s0, "asyncio", _use_mpsc=False)
         cb_id = id(helper.cb_arg)
-        with _aio_map_lock:
-            assert cb_id in _aio_map
+        assert cb_id in _aio_map
         # Simulate helper whose aio was freed or failed to allocate
         lib.nng_aio_free(helper.aio)
         helper.aio = None
         helper._free()
-        with _aio_map_lock:
-            assert cb_id not in _aio_map
+        assert cb_id not in _aio_map
         if helper.awaitable is not None:
             helper.awaitable.close()
 
 
 def test_aio_map_multithreaded_access():
     import concurrent.futures
-    from pynng._aio import _aio_map, _aio_map_lock, _async_complete
+    from pynng._aio import _aio_map, _async_complete
     from pynng._nng import ffi
 
     def churn_map(idx):
         obj = object()
         obj_id = id(obj)
-        with _aio_map_lock:
-            _aio_map[obj_id] = lambda: None
+        _aio_map[obj_id] = lambda: None
         # Call completion
         void_p = ffi.cast("void *", obj_id)
         _async_complete(void_p)
@@ -392,4 +383,3 @@ async def test_device_aio_cancellation_with_mpsc():
             await task
         assert dev.aio is None
         assert dev._aio_entry is None
-

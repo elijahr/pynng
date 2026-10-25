@@ -252,3 +252,27 @@ async def test_trio_pipe_events_async_context_manager():
 
         # After exiting async with, callbacks should be unregistered
         assert stream._closed
+
+
+@pytest.mark.asyncio
+async def test_pipe_events_remove_on_local_socket_close(nng):
+    """Closing the socket itself produces a remove event for its pipes."""
+    addr = "inproc://test-pipe-events-remove-local-close"
+    s0 = nng.Pair0(listen=addr)
+    stream = s0.pipe_events()
+    try:
+        with nng.Pair0(dial=addr):
+            events = []
+            while not any(e.event_type == "post_add" for e in events):
+                events.append(await asyncio.wait_for(stream.__anext__(), timeout=5))
+            pipe_id = next(e.pipe.id for e in events if e.event_type == "post_add")
+
+            s0.close()
+
+            while not any(e.event_type == "remove" for e in events):
+                events.append(await asyncio.wait_for(stream.__anext__(), timeout=5))
+            removed = [e.pipe.id for e in events if e.event_type == "remove"]
+            assert removed == [pipe_id]
+    finally:
+        stream.close()
+        s0.close()

@@ -68,9 +68,10 @@ def _check_fork():
 
 
 
-# Keep CFFI socket handles alive for callbacks until socket close.
+# Live sockets by (version tag, socket id). No lock guards it: Socket.__del__
+# updates it, and a finalizer can run while its thread holds any lock. Each
+# update is one dict operation on a key that only the calling socket can own.
 _active_handles = {}
-_active_handles_lock = threading.Lock()
 
 
 
@@ -205,95 +206,113 @@ def _do_callbacks(pipe, callbacks):
             logger.exception(msg.format(cb))
 
 
+class _PipeState:
+    """Dispatcher bookkeeping for one pipe, from its first event to REM_POST."""
+
+    __slots__ = ("added", "pipe", "rejected", "removing", "running")
+
+    def __init__(self, pipe):
+        self.pipe = pipe
+        # Idents of threads currently running callbacks for this pipe.
+        self.running = []
+        self.added = False
+        self.rejected = False
+        self.removing = False
+
+
 def _handle_pipe_event(sock, lib_pipe, event, lib):
-    """Thread-safe pipe event dispatcher shared by v1 and v2 callbacks.
+    """Pipe event dispatcher shared by the v1 and v2 callbacks.
 
-    In nng, ``nni_pipe_run_cb`` releases ``s_pipe_cbs_mtx`` before invoking the
-    CFFI callback, and ``pipe_destroy`` on the reaper thread invokes
-    ``NNG_PIPE_EV_REM_POST`` before waiting for ``p_ref == 0``. Consequently,
-    ``NNG_PIPE_EV_REM_POST`` on the reaper thread can acquire the Python GIL
-    and ``sock._pipe_notify_lock`` before ``NNG_PIPE_EV_ADD_POST`` (or even
-    ``NNG_PIPE_EV_ADD_PRE``) on the dialer/listener thread.
+    nng v1 releases its callback mutex before it calls the pipe callback, and
+    delivers ``NNG_PIPE_EV_REM_POST`` on the reaper thread while the dialer or
+    listener thread may still be about to deliver ``NNG_PIPE_EV_ADD_PRE`` or
+    ``NNG_PIPE_EV_ADD_POST`` for the same pipe. nng v2 serializes pipe
+    callbacks and never delivers them out of order, so the waits below never
+    block there.
 
-    This dispatcher enforces:
-    1. Pipes enter ``sock._pre_pipes`` on ``ADD_PRE`` and only enter
-       ``sock._pipes`` on ``ADD_POST`` (after ``pipe_start`` in nng).
-    2. Removed pipe IDs are recorded in ``sock._removed_pipes`` so a delayed
-       ``ADD_PRE`` or ``ADD_POST`` never re-inserts a removed pipe into
-       ``sock._pipes``.
-    3. If ``REM_POST`` arrives while a pipe is still in ``_pre_pipes``, it may
-       either be a protocol rejection in ``pipe_start`` (where ``ADD_POST``
-       will never fire) or an overtaken ``ADD_POST``. ``REM_POST`` records the
-       removal without firing ``post_add``/``post_remove``; if ``ADD_POST``
-       subsequently arrives (proving ``pipe_start`` succeeded), ``ADD_POST``
-       delivers ``_on_post_pipe_add`` and ``_on_post_pipe_remove`` in causal
-       order without re-adding the pipe to ``sock._pipes``.
+    Guarantees, per pipe:
+
+    * Callbacks for one pipe never run concurrently. ``post_pipe_remove``
+      callbacks wait until the pre/post connect callbacks that already
+      started have returned.
+    * Once ``REM_POST`` has been seen, a late ``ADD_PRE`` or ``ADD_POST`` is
+      dropped: no callbacks run and the pipe does not return to
+      ``Socket.pipes``. A pipe that ``pipe_start`` rejects therefore gets
+      ``pre_pipe_connect`` and ``post_pipe_remove`` but no
+      ``post_pipe_connect``.
+    * A pipe that a ``pre_pipe_connect`` callback closes gets no
+      ``post_pipe_connect`` or ``post_pipe_remove`` callbacks.
+    * A pipe is in ``Socket.pipes`` from ``ADD_PRE`` until its
+      ``post_pipe_remove`` callbacks have returned, unless a pre-connect
+      callback closed it.
+
+    A callback must not wait for a later callback of the same pipe, because
+    that later callback waits for it to return. With nng v1 this includes
+    closing a socket from a connect callback: the close waits for nng's reaper
+    thread, which can be waiting in ``REM_POST`` for that callback.
     """
-    callbacks = None
-    post_remove_callbacks = None
-    pipe = None
     pipe_id = lib.nng_pipe_id(lib_pipe)
-
-    with sock._pipe_notify_lock:
-        if sock._socket_closed:
+    me = threading.get_ident()
+    cond = sock._pipe_notify_cond
+    with cond:
+        if pipe_id in sock._removed_pipe_ids:
             return
-        if event == lib.NNG_PIPE_EV_ADD_PRE:
-            if pipe_id in sock._removed_pipes:
-                return
-            pipe = sock._get_or_create_pre_pipe(lib_pipe)
-            callbacks = list(sock._on_pre_pipe_add)
-        elif event == lib.NNG_PIPE_EV_ADD_POST:
-            sock._pre_pipes.pop(pipe_id, None)
-            if pipe_id in sock._removed_pipes:
-                sock._pipes.pop(pipe_id, None)
-                removed_pipe = sock._removed_pipes.get(pipe_id)
-                if (
-                    removed_pipe is not None
-                    and removed_pipe._pre_add_completed
-                    and not removed_pipe.closed
-                ):
-                    pipe = removed_pipe
-                    callbacks = list(sock._on_post_pipe_add)
-                    post_remove_callbacks = list(sock._on_post_pipe_remove)
-            else:
-                pipe = sock._pipes.get(pipe_id)
-                if pipe is None:
-                    pipe_cls = sock._pipe_class or Pipe
-                    pipe = pipe_cls(lib_pipe, sock)
-                if pipe.closed:
-                    sock._pipes.pop(pipe_id, None)
-                    sock._mark_pipe_removed(pipe_id, pipe)
-                    return
-                sock._pipes[pipe_id] = pipe
-                callbacks = list(sock._on_post_pipe_add)
-        elif event == lib.NNG_PIPE_EV_REM_POST:
-            pipe = sock._pipes.pop(pipe_id, None)
-            pre_pipe = sock._pre_pipes.pop(pipe_id, None)
-            if pipe is not None:
-                sock._mark_pipe_removed(pipe_id, pipe)
-                callbacks = list(sock._on_post_pipe_remove)
-            elif pre_pipe is not None:
-                sock._mark_pipe_removed(pipe_id, pre_pipe)
-                return
-            else:
-                sock._mark_pipe_removed(pipe_id, None)
+        state = sock._pipe_states.get(pipe_id)
+        if event == lib.NNG_PIPE_EV_REM_POST:
+            if state is None:
+                # REM_POST overtook ADD_PRE; ADD_PRE must not resurrect it.
+                sock._remember_removed_pipe_id(pipe_id)
                 logger.debug("Could not find pipe for socket")
                 return
+            if state.removing:
+                return
+            state.removing = True
+            if not state.added:
+                sock._remember_removed_pipe_id(pipe_id)
+            while any(t != me for t in state.running):
+                cond.wait()
+            callbacks = [] if state.rejected else list(sock._on_post_pipe_remove)
+        elif event == lib.NNG_PIPE_EV_ADD_PRE:
+            if state is not None:
+                return
+            pipe_cls = sock._pipe_class or Pipe
+            state = _PipeState(pipe_cls(lib_pipe, sock))
+            sock._pipe_states[pipe_id] = state
+            sock._pipes[pipe_id] = state.pipe
+            callbacks = list(sock._on_pre_pipe_add)
+        elif event == lib.NNG_PIPE_EV_ADD_POST:
+            if state is None:
+                pipe_cls = sock._pipe_class or Pipe
+                state = _PipeState(pipe_cls(lib_pipe, sock))
+                sock._pipe_states[pipe_id] = state
+            elif state.removing or state.added or state.rejected:
+                return
+            state.added = True
+            sock._pipes[pipe_id] = state.pipe
+            callbacks = list(sock._on_post_pipe_add)
+        else:
+            return
+        state.running.append(me)
+        pipe = state.pipe
 
     try:
-        if callbacks and pipe:
-            _do_callbacks(pipe, callbacks)
-        if post_remove_callbacks and pipe:
-            _do_callbacks(pipe, post_remove_callbacks)
+        _do_callbacks(pipe, callbacks)
     finally:
-        if event == lib.NNG_PIPE_EV_ADD_PRE and pipe is not None:
-            with sock._pipe_notify_lock:
-                if pipe.closed or pipe_id in sock._removed_pipes:
-                    sock._pre_pipes.pop(pipe_id, None)
+        with cond:
+            state.running.remove(me)
+            if event == lib.NNG_PIPE_EV_REM_POST:
+                if sock._pipe_states.get(pipe_id) is state:
+                    del sock._pipe_states[pipe_id]
                     sock._pipes.pop(pipe_id, None)
-                    sock._mark_pipe_removed(pipe_id, pipe)
-                else:
-                    pipe._pre_add_completed = True
+            elif (
+                event == lib.NNG_PIPE_EV_ADD_PRE
+                and sock._pipe_states.get(pipe_id) is state
+                and not state.added
+                and pipe.closed
+            ):
+                state.rejected = True
+                sock._pipes.pop(pipe_id, None)
+            cond.notify_all()
 
 
 class PipeEventStream:
@@ -590,12 +609,13 @@ class Socket:
         self._dialers = {}
         self._listeners = {}
         self._pipes = {}
-        self._pre_pipes = {}
-        self._removed_pipes = {}
+        self._pipe_states = {}
+        self._removed_pipe_ids = {}
         self._on_pre_pipe_add = []
         self._on_post_pipe_add = []
         self._on_post_pipe_remove = []
         self._pipe_notify_lock = threading.Lock()
+        self._pipe_notify_cond = threading.Condition(self._pipe_notify_lock)
         self._socket_closed = False
         self._close_lock = threading.Lock()
         self._async_backend = async_backend
@@ -636,11 +656,15 @@ class Socket:
         # set up pipe callbacks. This **must** be called before listen/dial to
         # avoid race conditions.
         self._setup_pipe_callbacks()
+        self._configure_protocol_options()
 
         if listen is not None:
             self.listen(listen)
         if dial is not None:
             self.dial(dial, block=block_on_dial)
+
+    def _configure_protocol_options(self):
+        """Hook for protocol subclasses to apply options before listen/dial."""
 
     def _setup_pipe_callbacks(self):
         """Register pipe notification callbacks with NNG."""
@@ -649,10 +673,8 @@ class Socket:
 
         handle = _ffi.new_handle(self)
         self._handle = handle
-        version_tag = self._version_tag
-        sock_id = _lib.nng_socket_id(self.socket)
-        with _active_handles_lock:
-            _active_handles[(version_tag, sock_id)] = weakref.ref(self)
+        key = (self._version_tag, _lib.nng_socket_id(self.socket))
+        _active_handles[key] = weakref.ref(self)
 
         for event in (
             _lib.NNG_PIPE_EV_ADD_PRE,
@@ -754,20 +776,20 @@ class Socket:
                 return
             self._socket_closed = True
         _lib = self._lib
-        version_tag = self._version_tag
-        sock_id = _lib.nng_socket_id(self.socket)
+        key = (self._version_tag, _lib.nng_socket_id(self.socket))
+        # Deregister before close_fn: until then nng cannot give this id to
+        # another socket, so no other thread writes this key.
+        ref = _active_handles.get(key)
+        if ref is not None and (ref() is self or ref() is None):
+            _active_handles.pop(key, None)
         close_fn(self.socket)
-        with _active_handles_lock:
-            key = (version_tag, sock_id)
-            ref = _active_handles.get(key)
-            if ref is not None and (ref() is self or ref() is None):
-                del _active_handles[key]
         self._listeners = {}
         self._dialers = {}
-        with self._pipe_notify_lock:
+        with self._pipe_notify_cond:
             self._pipes.clear()
-            self._pre_pipes.clear()
-            self._removed_pipes.clear()
+            self._pipe_states.clear()
+            self._removed_pipe_ids.clear()
+            self._pipe_notify_cond.notify_all()
         while self._recv_pool:
             self._recv_pool.pop()._free()
         while self._send_pool:
@@ -1022,7 +1044,11 @@ class Socket:
         """A list of the active listeners"""
         return tuple(self._listeners.values())
 
-    _MAX_REMOVED_PIPES = 1024
+    # Only pipes removed before their ADD_POST was seen are recorded, and any
+    # late ADD event for them is already in flight on the dialer or listener
+    # thread, so a small bound keeps memory flat without forgetting an id that
+    # is still needed.
+    _MAX_REMOVED_PIPE_IDS = 1024
 
     @property
     def pipes(self):
@@ -1030,45 +1056,12 @@ class Socket:
         with self._pipe_notify_lock:
             return tuple(self._pipes.values())
 
-    def _get_or_create_pre_pipe(self, lib_pipe):
+    def _remember_removed_pipe_id(self, pipe_id):
         # Must be called with self._pipe_notify_lock held.
-        _lib = self._lib
-        pipe_id = _lib.nng_pipe_id(lib_pipe)
-        if pipe_id in self._pipes:
-            return self._pipes[pipe_id]
-        if pipe_id not in self._pre_pipes:
-            pipe_cls = self._pipe_class or Pipe
-            self._pre_pipes[pipe_id] = pipe_cls(lib_pipe, self)
-        return self._pre_pipes[pipe_id]
-
-    def _mark_pipe_removed(self, pipe_id, pipe=None):
-        # Must be called with self._pipe_notify_lock held.
-        existing = self._removed_pipes.pop(pipe_id, None)
-        self._removed_pipes[pipe_id] = pipe if pipe is not None else existing
-        while len(self._removed_pipes) > self._MAX_REMOVED_PIPES:
-            self._removed_pipes.pop(next(iter(self._removed_pipes)))
-
-    def _add_pipe(self, lib_pipe):
-        # this is only called inside the pipe callback.
-        _lib = self._lib
-        pipe_id = _lib.nng_pipe_id(lib_pipe)
-
-        # If the pipe already exists in the Socket, don't create a new one
-        if pipe_id not in self._pipes:
-            pipe = self._pre_pipes.pop(pipe_id, None)
-            if pipe is None:
-                pipe_cls = self._pipe_class or Pipe
-                pipe = pipe_cls(lib_pipe, self)
-            self._pipes[pipe_id] = pipe
-
-        return self._pipes[pipe_id]
-
-    def _remove_pipe(self, lib_pipe):
-        _lib = self._lib
-        pipe_id = _lib.nng_pipe_id(lib_pipe)
-        pipe = self._pipes.pop(pipe_id, None)
-        pre_pipe = self._pre_pipes.pop(pipe_id, None)
-        self._mark_pipe_removed(pipe_id, pipe or pre_pipe)
+        ids = self._removed_pipe_ids
+        ids[pipe_id] = None
+        if len(ids) > self._MAX_REMOVED_PIPE_IDS:
+            del ids[next(iter(ids))]
 
     # Subclasses can override these to return version-specific classes.
     _context_class = None
@@ -1179,18 +1172,11 @@ class Socket:
         with self._pipe_notify_lock:
             lib_pipe = _lib.nng_msg_get_pipe(msg._nng_msg)
             pipe_id = _lib.nng_pipe_id(lib_pipe)
-            if pipe_id in self._pipes:
-                msg.pipe = self._pipes[pipe_id]
-            elif pipe_id in self._pre_pipes:
-                msg.pipe = self._pre_pipes[pipe_id]
-            elif pipe_id in self._removed_pipes:
-                removed_pipe = self._removed_pipes[pipe_id]
-                if removed_pipe is None:
-                    pipe_cls = self._pipe_class or Pipe
-                    removed_pipe = pipe_cls(lib_pipe, self)
-                    self._removed_pipes[pipe_id] = removed_pipe
-                msg.pipe = removed_pipe
+            state = self._pipe_states.get(pipe_id)
+            if state is not None:
+                msg.pipe = state.pipe
             elif pipe_id >= 0:
+                # The pipe is already removed; do not put it back in self._pipes.
                 pipe_cls = self._pipe_class or Pipe
                 msg.pipe = pipe_cls(lib_pipe, self)
 
@@ -1333,7 +1319,6 @@ class Pipe:
         self.pipe = self._pipe[0]
         self.socket = socket
         self._closed = False
-        self._pre_add_completed = False
 
     @property
     def _lib(self):
@@ -1393,12 +1378,8 @@ class Pipe:
         """
         from .exceptions import check_err
 
+        check_err(self._lib.nng_pipe_close(self.pipe))
         self._closed = True
-        try:
-            check_err(self._lib.nng_pipe_close(self.pipe))
-        except Exception:
-            self._closed = False
-            raise
 
     def send(self, data):
         """

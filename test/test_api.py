@@ -1,8 +1,10 @@
 import contextlib
 import gc
 import io
+import pathlib
 import platform
 import time
+import warnings
 
 import pytest
 import trio
@@ -368,3 +370,13 @@ def test_pair1_polyamorous_send_recv():
         dialer.send(b"poly")
         assert listener.recv() == b"poly"
 
+
+def test_pynng_sources_compile_without_syntax_warnings():
+    """Python 3.14 warns about control flow such as ``return`` in ``finally``
+    (PEP 765), and fails the import under ``-W error``."""
+    sources = sorted(pathlib.Path(pynng.__file__).parent.rglob("*.py"))
+    assert sources
+    for source in sources:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", SyntaxWarning)
+            compile(source.read_text(), str(source), "exec")

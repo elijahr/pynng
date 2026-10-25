@@ -49,15 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scope cibuildwheel tests to exclude build-system tests (run in smoketest instead)
 - Python 3.10 EOL deprecation advisory in documentation and README
 - Modernize GitHub Actions workflows to Node 24-compatible actions
+- Pipe callbacks for one pipe no longer run at the same time: `post_pipe_remove` callbacks wait until the running `pre_pipe_connect` and `post_pipe_connect` callbacks for that pipe return (with nng v1 they could run concurrently on the reaper thread). A pipe callback must not wait for a later callback of the same pipe; with nng v1 this includes closing a socket from a connect callback, because the close waits for the reaper thread
 
 ### Fixed
-- Prevent pipe notification race where `NNG_PIPE_EV_REM_POST` on the `nng` reaper thread overtakes `NNG_PIPE_EV_ADD_POST` (or `NNG_PIPE_EV_ADD_PRE`) and leaves removed pipes stranded in `Socket.pipes`, and ensure `Sub0`, `Req0`, and `Surveyor0` apply protocol options (`topics`, `resend_time`, `survey_time`) before `listen`/`dial`
+- Prevent removed pipes from staying in `Socket.pipes` with nng v1: when `NNG_PIPE_EV_REM_POST` from the reaper thread reaches Python before `NNG_PIPE_EV_ADD_PRE` or `NNG_PIPE_EV_ADD_POST` for the same pipe, the late event is now dropped, so it no longer adds the pipe back or runs `post_pipe_connect` callbacks after `post_pipe_remove` callbacks. A message received from a removed pipe also no longer adds the pipe back
+- Prevent a deadlock with nng v2 when a pipe callback reads `Socket.pipes`: v2 pipe callbacks now run without the socket's pipe lock held, as v1 callbacks already did
+- Apply `Sub0(topics=...)` before `listen`/`dial`, so messages that arrive just after the connection is made are no longer dropped before the subscription exists
+- Prevent a deadlock when garbage collection finalizes an unclosed `Socket`, `Context`, `AIOHelper` or `DeviceAIO` while the same thread is registering or closing a socket or an AIO: the `_active_handles` and `_aio_map` registries no longer use locks, because a finalizer can run while its thread holds one
 - Fix #108: Prevent process crash / NNG panic during Python interpreter shutdown by disabling unconditional `nng_fini()` at atexit (`nng_fini_at_exit = False`) and guarding `Socket`, `Context`, `Message`, `AIOHelper`, and `DeviceAIO` finalizers against calling deallocated NNG C state during GC
 - Fix #113: Prevent hard C aborts (`panic: nng is not fork-reentrant safe`) in forked child processes by detecting `fork()` and raising a descriptive Python `RuntimeError` directing users to `multiprocessing.set_start_method('spawn')`
 - Fix #104: Prevent `RuntimeError: cannot use unpack() on <cdata 'char *' NULL>` when receiving 0-byte messages via v1 `Socket.recv()`
 - Fix #128: Ensure `asyncio.CancelledError` is always propagated by `wait_for_aio()` if task was cancelled, preventing swallowed cancellations and freeing orphaned messages during cancel/send races
 - `ffi.from_handle` dangling pointer in pipe callbacks: module-level `_active_handles` registry keeps handles alive until `Socket.close()` completes, with try/except guard in `_nng_pipe_cb`
-- `_aio_map` thread safety for free-threaded Python (3.13t/3.14t): all accesses protected by `_aio_map_lock`
+- `_aio_map` thread safety for free-threaded Python (3.13t/3.14t): every access is a single dict operation, which is atomic without the GIL
 - `AIOHelper._free()` potential deadlock during GC: cancel pending AIO operations before calling `nng_aio_free()` to prevent callback/GIL deadlock
 - Pipe callback list mutations now protected by `_pipe_notify_lock` for thread safety under free-threaded Python
 - Make `Socket.close()` idempotent and thread-safe with `_close_lock` and `_socket_closed` flag
