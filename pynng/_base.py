@@ -12,6 +12,7 @@ This is an internal module. Users should import from ``pynng`` (v1) or
 
 import asyncio
 import collections
+import contextlib
 import logging
 import math
 import os
@@ -22,7 +23,7 @@ import sniffio
 
 from . import options
 from . import _aio
-from .exceptions import NNGException, TryAgain, check_err
+from .exceptions import Closed, NNGException, TryAgain, check_err
 from ._finalized import (
     is_nng_finalized as _is_nng_finalized,
     retain_closed as _retain_closed,
@@ -72,6 +73,23 @@ def _check_fork():
 # update is one dict operation on a key that only the calling socket can own.
 _active_handles = {}
 
+# Guards Socket._device_aios and the start and end of every device aio. Take
+# it only through _device_section().
+_device_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _device_section():
+    # The mark is set before the lock is taken and cleared after it is
+    # released, so it covers all of the time this thread holds the lock.
+    state = _aio._device_section_thread
+    depth = getattr(state, "depth", 0)
+    state.depth = depth + 1
+    try:
+        with _device_lock:
+            yield
+    finally:
+        state.depth = depth
 
 
 PipeEvent = collections.namedtuple("PipeEvent", ["pipe", "event_type"])
@@ -628,6 +646,9 @@ class Socket:
         self._socket_closed = False
         self._close_lock = threading.Lock()
         self._close_done = threading.Event()
+        # nng_aio of each device running on this socket. nng v2 refuses to
+        # close a socket that a device owns, so close() must end the device.
+        self._device_aios = set()
         self._pool_lock = threading.Lock()
         self._async_backend = async_backend
         self._recv_pool = []
@@ -780,7 +801,9 @@ class Socket:
         close has finished. ``close_fn`` waits for running pipe callbacks to
         return, so the lock is not held while it runs, and a caller that is
         running a pipe callback never waits: it returns at once, and if it is
-        the first caller, the socket is closed on another thread.
+        the first caller, the socket is closed on another thread. The same
+        applies to a caller in a device section, which is a finalizer that
+        runs while its thread can hold the device lock.
 
         Args:
             close_fn: The NNG close function to call (e.g. lib.nng_close or
@@ -791,11 +814,12 @@ class Socket:
         with self._close_lock:
             first = not self._socket_closed
             self._socket_closed = True
+        must_not_wait = _in_pipe_callback() or _aio._in_device_section()
         if not first:
-            if not _in_pipe_callback():
+            if not must_not_wait:
                 self._close_done.wait()
             return
-        if _in_pipe_callback():
+        if must_not_wait:
             threading.Thread(
                 target=self._finish_close, args=(close_fn,), name="pynng-close"
             ).start()
@@ -804,6 +828,7 @@ class Socket:
 
     def _finish_close(self, close_fn):
         try:
+            self._end_devices()
             _lib = self._lib
             key = (self._version_tag, _lib.nng_socket_id(self.socket))
             # Deregister before close_fn: until then nng cannot give this id to
@@ -830,6 +855,16 @@ class Socket:
                 helper._free()
         finally:
             self._close_done.set()
+
+    def _end_devices(self):
+        """End the devices on this socket; nng closes the sockets they own."""
+        with _device_section():
+            aios = list(self._device_aios)
+            for aio in aios:
+                self._lib.nng_aio_abort(aio, self._lib.NNG_ECLOSED)
+            # A device is done, and has closed its sockets, when its aio is.
+            for aio in aios:
+                self._lib.nng_aio_wait(aio)
 
     def __del__(self):
         if _is_nng_finalized():
@@ -1220,6 +1255,51 @@ class Socket:
                 # The pipe is already removed; do not put it back in self._pipes.
                 pipe_cls = self._pipe_class or Pipe
                 msg.pipe = pipe_cls(lib_pipe, self)
+
+
+def _resolve_socket(obj, default_lib, default_ffi):
+    """Return ``(lib, ffi, nng_socket)`` for a :class:`Socket` or an ``nng_socket``.
+
+    A bare ``nng_socket`` carries no library reference, so it is taken to belong
+    to ``default_lib``; its cffi type tells whether it really does.
+    """
+    if isinstance(obj, Socket):
+        return obj._lib, obj._ffi, obj.socket
+    if default_ffi.typeof(obj) is not default_ffi.typeof("nng_socket"):
+        raise ValueError(
+            "Cannot use an nng_socket from a different nng version here; "
+            "pass the pynng Socket object instead"
+        )
+    return default_lib, default_ffi, obj
+
+
+def _start_device(owners, lib, aio, sock1, sock2):
+    """Start ``nng_device_aio`` and let each Socket in ``owners`` end it on close."""
+    with _device_section():
+        for owner in owners:
+            if owner._socket_closed:
+                raise Closed("Object closed", lib.NNG_ECLOSED)
+        lib.nng_device_aio(aio, sock1, sock2)
+        for owner in owners:
+            owner._device_aios.add(aio)
+
+
+def _stop_device(owners, aio):
+    """Forget a device aio; call this when it is done and before it is freed."""
+    with _device_section():
+        for owner in owners:
+            owner._device_aios.discard(aio)
+
+
+def _device_sockets(s1, s2, default_lib, default_ffi):
+    """Resolve the two sockets of a device to ``(lib, ffi, sock1, sock2)``."""
+    lib1, ffi1, sock1 = _resolve_socket(s1, default_lib, default_ffi)
+    if s2 is None:
+        return lib1, ffi1, sock1, ffi1.new("nng_socket *", {"id": 0})[0]
+    lib2, _, sock2 = _resolve_socket(s2, lib1, ffi1)
+    if lib2 is not lib1:
+        raise ValueError("Cannot bridge sockets from different nng versions")
+    return lib1, ffi1, sock1, sock2
 
 
 class Dialer:

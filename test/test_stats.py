@@ -81,3 +81,17 @@ def test_stat_repr():
         st = s1.stats()
         r = repr(st)
         assert "Stat(name='socket'" in r
+
+
+def test_socket_stats_accepts_object_exposing_socket():
+    """socket_stats() unwraps an object whose .socket is an nng_socket."""
+    from pynng.stats import socket_stats
+
+    class Wrapper:
+        def __init__(self, sock):
+            self.socket = sock.socket
+
+    with pynng.Pair0() as s:
+        st = socket_stats(Wrapper(s))
+        assert st is not None
+        assert st.find("id").value == s.socket.id

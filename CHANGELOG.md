@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support Python 3.15 in package classifiers and CI smoketest matrix
 - Support PyPy 3.11 in CI smoketest matrix, `cibuildwheel` release builds, and PyPI implementation classifiers
 - `pynng.nng_fini()` function and `nng_fini_at_exit` setting for explicit runtime finalization control
+- `raw=True` for every `pynng.v2` protocol class, and the raw classes `pynng.v2.RawBus0`, `RawPair0`, `RawPair1`, `RawPush0`, `RawPull0`, `RawPub0`, `RawSub0`, `RawReq0`, `RawRep0`, `RawSurveyor0` and `RawRespondent0`
+- `pynng.v2.device()` and `pynng.v2.adevice()`
+- nng v2 statistics: `pynng.v2.stats()`, `pynng.v2.socket_stats()`, `pynng.v2.Socket.stats()` and `pynng.v2.Socket.stat()`, and `pynng.v2.Stat`. The bundled nng v2 is now built with statistics enabled
+- Endpoint TLS for nng v2: `tls_config=` on `pynng.v2.Socket.dial()` and `listen()`, `pynng.v2.Dialer.tls_config` and `pynng.v2.Listener.tls_config`, and `pynng.v2.Socket.tls_config` (the default for the socket's endpoints; endpoints whose transport has no TLS ignore it, as in v1). One `TLSConfig` can be used with both v1 and v2 endpoints
+- `start=False` on `pynng.v2.Socket.dial()` and `listen()`, with `pynng.v2.Dialer.start()` and `pynng.v2.Listener.start()` to start the endpoint later
+- `pynng.v2.Dialer.url` and `pynng.v2.Listener.url`
+- `socket=` argument of `Rep0Service` (v1 and v2), to serve on an existing `Rep0` socket that the service does not close. `address` is optional when `socket` is given. The service closes the listener it made for `address` and restores the socket's timeouts on exit. A socket that is not a non-raw `Rep0` of the service's nng version raises `TypeError` or `ValueError`
 
 ### Changed
 - Upgrade bundled v1 NNG from v1.11 to v1.12.5, incorporating upstream fixes for large IOV scatter/gather transfers, mbedTLS CVE-2025-27809, and AIO task abort race conditions while removing obsolete patch files
@@ -53,6 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove the unused internal C function `pynng_aio_entry_set_queue` from the completion queue engine. It could not keep the queue reference counts correct for an entry that was in a queue
 - A synchronous receive (`recv()`, `recv_msg()`, `recv_into()`) on a socket or context now keeps one receive in flight until it completes, times out, or is interrupted. Before, it cancelled and restarted the receive every 100 ms, which ends a `Req0` request and a `Surveyor0` survey: a `Req0` receive whose reply took longer than 100 ms raised `BadState`, and a `Surveyor0` receive raised `Timeout` after about 100 ms, whatever the `survey_time`. Ctrl-C still interrupts a blocking receive
 - `Socket.close()` called while another thread closes the socket now returns only after the socket is closed. Before, it returned at once
+- `pynng.v2.TLSConfig` is now a subclass of `pynng.TLSConfig` that allocates its configuration with nng v2. Before, it was `pynng.TLSConfig`
+- A `TLSConfig` now allocates a configuration for each initialized nng version (v1, and v2 when `pynng.v2` is imported) when it is created, and each setter changes all of them. It no longer keeps the setter arguments, such as private keys and passwords. A `pynng.TLSConfig` created before `pynng.v2` is imported cannot be used with v2 endpoints (`RuntimeError`). When a setter succeeds for one version and fails for another, the config cannot be used with the failed version any more (`RuntimeError`)
+- `pynng.v2.Pair1(raw=True, polyamorous=True)` now raises `ValueError`. Before, `polyamorous` was ignored, because nng has no raw polyamorous pair1 socket
 - `Socket.close()` called from a pipe callback now returns at once, and the socket is closed on another thread when the running pipe callbacks have returned. Before, a close from a socket's own `post_pipe_connect` callback, or from a `post_pipe_remove` callback when no other thread was closing the socket, never returned
 
 ### Fixed
@@ -71,6 +81,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `PipeEventStream` whose event loop has finished now drops pipe events without logging an exception
 - Access to the pooled async helpers of `Socket` and `Context` is now serialized, so a thread no longer gets `IndexError` when another thread takes the last pooled helper at the same time, and a helper released while the socket or context closes is freed instead of left in the pool
 - `Context.close()` is now thread-safe: when two threads close a context at the same time, nng closes it once
+- `pynng.v2.Sub0.unsubscribe_all()` now also removes a topic that nng no longer has from `Sub0.subscriptions`. Before, `NoEntry` left the topic in the set. It now also holds the subscription lock for the whole operation
+- `pynng.v2.Surveyor0.asurvey()` no longer raises `NameError`, and `pynng.v2.Surveyor0.recv_msg()` raises `Timeout` when no survey is in progress, as v1 does
+- `pynng.v2.Rep0Service` now uses a `pynng.v2.Rep0` socket. Before, it was `pynng.Rep0Service`, which uses an nng v1 socket
+- `pynng.device()` and `pynng.adevice()` now accept nng v2 sockets
+- Closing a socket that a device uses now ends the device with `Closed`, also with nng v2. Before, nng v2 refused to close the socket, so `pynng.v2.device()` never returned and the socket stayed open
 - Fix #108: Prevent process crash / NNG panic during Python interpreter shutdown by disabling unconditional `nng_fini()` at atexit (`nng_fini_at_exit = False`) and guarding `Socket`, `Context`, `Message`, `AIOHelper`, and `DeviceAIO` finalizers against calling deallocated NNG C state during GC
 - Fix #113: Prevent hard C aborts (`panic: nng is not fork-reentrant safe`) in forked child processes by detecting `fork()` and raising a descriptive Python `RuntimeError` directing users to `multiprocessing.set_start_method('spawn')`
 - Fix #104: Prevent `RuntimeError: cannot use unpack() on <cdata 'char *' NULL>` when receiving 0-byte messages via v1 `Socket.recv()`
