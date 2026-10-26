@@ -508,3 +508,56 @@ def test_mpsc_engine_register_skips_occupied_slots_on_wraparound():
     engine._slot_counter = 0x7FFFFFFF
     assert engine.register(new) == 2
     assert engine._slots == {1: pending, 2: new}
+
+
+@pytest.mark.asyncio
+async def test_socket_helper_released_while_socket_closes_is_freed(monkeypatch):
+    with pynng.Pair0() as sock:
+        helper = sock._acquire_recv_helper()
+        is_valid = AIOHelper.is_valid_for_current_loop
+
+        closed = []
+
+        def close_socket_then_check(self):
+            # The socket closes between the release's closed check and the
+            # moment the helper would be pooled.
+            if self is helper and not closed:
+                closed.append(helper)
+                sock.close()
+            return is_valid(self)
+
+        monkeypatch.setattr(
+            AIOHelper, "is_valid_for_current_loop", close_socket_then_check
+        )
+        sock._release_recv_helper(helper)
+        monkeypatch.undo()
+        assert closed == [helper]
+        assert helper.aio is None
+
+
+@pytest.mark.asyncio
+async def test_context_helper_released_while_context_closes_is_freed(monkeypatch):
+    with pynng.Rep0() as sock:
+        ctx = sock.new_context()
+        pooled = ctx._acquire_recv_helper()
+        in_use = ctx._acquire_recv_helper()
+        ctx._release_recv_helper(pooled)
+        free = AIOHelper._free
+        released = []
+
+        def release_other_then_free(self):
+            # Another operation on the context finishes while close() is
+            # draining the pool.
+            if self is pooled and not released:
+                released.append(in_use)
+                ctx._release_recv_helper(in_use)
+            free(self)
+
+        monkeypatch.setattr(AIOHelper, "_free", release_other_then_free)
+        ctx.close()
+        # Restore _free while the helpers are alive, so their finalizers do
+        # not run the hook.
+        monkeypatch.undo()
+        assert released == [in_use]
+        assert pooled.aio is None
+        assert in_use.aio is None

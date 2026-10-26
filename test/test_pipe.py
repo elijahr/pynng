@@ -5,6 +5,10 @@ Let's test up those pipes
 
 import contextlib
 import gc
+import subprocess
+import sys
+import tempfile
+import textwrap
 import threading
 import time
 import weakref
@@ -833,3 +837,172 @@ def test_pipe_instance_identity_and_attribute_preserved_across_events():
         s1.close()
         assert removed.wait(5)
         assert observed["rem"] is observed["pre"]
+
+
+_CLOSE_SCENARIO_PRELUDE = """
+import os
+import sys
+import threading
+import time
+import traceback
+import uuid
+
+import {module} as nng
+
+addr = "inproc://close-scenario-" + uuid.uuid4().hex
+
+
+def run_in_thread(fn):
+    done = threading.Event()
+
+    def run():
+        fn()
+        done.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    return done
+
+
+def wait_pipe_len(sock, expected):
+    deadline = time.monotonic() + 5
+    while len(sock.pipes) != expected and time.monotonic() < deadline:
+        time.sleep(0.001)
+    assert len(sock.pipes) == expected
+"""
+
+_CLOSE_SCENARIO_RUN = """
+try:
+    main()
+except BaseException:
+    traceback.print_exc()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(1)
+print("OK", flush=True)
+"""
+
+
+def _run_close_scenario(nng, body):
+    """Run ``body`` (which defines ``main()``) in a child process.
+
+    A deadlock in close() would otherwise hang the test run, so the scenario
+    runs in a child that is killed when it does not finish in time.
+    """
+    code = (
+        _CLOSE_SCENARIO_PRELUDE.format(module=nng.__name__)
+        + textwrap.dedent(body)
+        + _CLOSE_SCENARIO_RUN
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        cwd=tempfile.gettempdir(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        out, err = proc.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        pytest.fail("close() scenario did not finish (deadlock)")
+    assert proc.returncode == 0, err
+    assert out == "OK\n", err
+
+
+@pytest.mark.parametrize(
+    "other_thread_closes", [False, True], ids=["alone", "concurrently"]
+)
+def test_close_from_remove_callback_returns(nng, other_thread_closes):
+    _run_close_scenario(
+        nng,
+        f"""
+        def main():
+            sock = nng.Pair0(listen=addr)
+            callback_entered = threading.Event()
+            callback_returned = threading.Event()
+
+            def on_remove(pipe):
+                callback_entered.set()
+                # Let the other thread enter close() while this callback runs.
+                time.sleep(0.3)
+                sock.close()
+                callback_returned.set()
+
+            sock.add_post_pipe_remove_cb(on_remove)
+            peer = nng.Pair0(dial=addr)
+            wait_pipe_len(sock, 1)
+            peer_closed = run_in_thread(peer.close)
+            assert callback_entered.wait(5)
+            if {other_thread_closes}:
+                sock_closed = run_in_thread(sock.close)
+            assert callback_returned.wait(5)
+            if not {other_thread_closes}:
+                sock_closed = run_in_thread(sock.close)
+            assert sock_closed.wait(5)
+            assert peer_closed.wait(5)
+            assert sock.pipes == ()
+    """,
+    )
+
+
+@pytest.mark.parametrize("close_twice", [False, True], ids=["once", "twice"])
+def test_close_from_own_connect_callback_returns(nng, close_twice):
+    _run_close_scenario(
+        nng,
+        f"""
+        def main():
+            sock = nng.Pair0(listen=addr, recv_timeout=500)
+            callback_returned = threading.Event()
+
+            def on_connect(pipe):
+                sock.close()
+                if {close_twice}:
+                    sock.close()
+                callback_returned.set()
+
+            sock.add_post_pipe_connect_cb(on_connect)
+            peer = nng.Pair0(dial=addr)
+            assert callback_returned.wait(5)
+            # A close from outside a callback returns once the socket is closed.
+            assert run_in_thread(sock.close).wait(5)
+            try:
+                sock.recv()
+            except nng.Closed:
+                pass
+            else:
+                raise AssertionError("recv() on a closed socket did not raise")
+            assert sock.pipes == ()
+            assert run_in_thread(peer.close).wait(5)
+    """,
+    )
+
+
+def test_concurrent_close_waits_until_socket_is_closed(nng):
+    _run_close_scenario(
+        nng,
+        """
+        def main():
+            sock = nng.Pair0(listen=addr)
+            callback_entered = threading.Event()
+            callback_returned = threading.Event()
+
+            def on_remove(pipe):
+                callback_entered.set()
+                time.sleep(0.3)
+                callback_returned.set()
+
+            sock.add_post_pipe_remove_cb(on_remove)
+            peer = nng.Pair0(dial=addr)
+            wait_pipe_len(sock, 1)
+            # The first close() waits in nng for the remove callback to return.
+            first_close = run_in_thread(sock.close)
+            assert callback_entered.wait(5)
+            assert not callback_returned.is_set()
+            sock.close()
+            assert callback_returned.is_set()
+            assert sock.pipes == ()
+            assert first_close.wait(5)
+            peer.close()
+    """,
+    )

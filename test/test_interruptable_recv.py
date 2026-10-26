@@ -10,9 +10,12 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
+from _test_util import wait_pipe_len
+from conftest import random_addr
 
 import pynng
 
@@ -195,3 +198,101 @@ def test_sock_recv_into_roundtrip():
         nbytes = s1.recv_into(buf)
         assert nbytes == 8
         assert buf[:8] == b"12345678"
+
+
+def _reply_later(rep, delay, payload):
+    """Receive one message on ``rep`` and send ``payload`` after ``delay`` s."""
+
+    def run():
+        rep.recv()
+        time.sleep(delay)
+        rep.send(payload)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread
+
+
+def test_req0_socket_recv_waits_past_slice_for_late_reply(nng):
+    addr = random_addr()
+    with (
+        nng.Rep0(listen=addr, recv_timeout=3000, send_timeout=3000) as rep,
+        nng.Req0(dial=addr, recv_timeout=3000, send_timeout=3000) as req,
+    ):
+        wait_pipe_len(req, 1)
+        req.send(b"question")
+        replier = _reply_later(rep, 0.3, b"late answer")
+        assert req.recv() == b"late answer"
+        replier.join(timeout=3)
+        assert not replier.is_alive()
+
+
+def test_req0_context_recv_waits_past_slice_for_late_reply(nng):
+    addr = random_addr()
+    with (
+        nng.Rep0(listen=addr, recv_timeout=3000, send_timeout=3000) as rep,
+        nng.Req0(dial=addr, recv_timeout=3000, send_timeout=3000) as req,
+    ):
+        wait_pipe_len(req, 1)
+        ctx = req.new_context()
+        ctx.send(b"question")
+        replier = _reply_later(rep, 0.3, b"late answer")
+        assert ctx.recv() == b"late answer"
+        replier.join(timeout=3)
+        assert not replier.is_alive()
+        ctx.close()
+
+
+def test_surveyor0_socket_recv_waits_past_slice_within_survey_time(nng):
+    addr = random_addr()
+    with (
+        nng.Surveyor0(listen=addr, survey_time=500) as surveyor,
+        nng.Respondent0(dial=addr, recv_timeout=3000) as respondent,
+    ):
+        wait_pipe_len(surveyor, 1)
+        surveyor.send(b"question")
+        replier = _reply_later(respondent, 0.3, b"late answer")
+        assert surveyor.recv() == b"late answer"
+        replier.join(timeout=3)
+        assert not replier.is_alive()
+
+
+def test_surveyor0_context_recv_waits_past_slice_within_survey_time(nng):
+    addr = random_addr()
+    with (
+        nng.Surveyor0(listen=addr, survey_time=500) as surveyor,
+        nng.Respondent0(dial=addr, recv_timeout=3000) as respondent,
+    ):
+        wait_pipe_len(surveyor, 1)
+        ctx = surveyor.new_context()
+        ctx.send(b"question")
+        replier = _reply_later(respondent, 0.3, b"late answer")
+        assert ctx.recv() == b"late answer"
+        replier.join(timeout=3)
+        assert not replier.is_alive()
+        ctx.close()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="SIGINT subprocess testing requires POSIX"
+)
+@pytest.mark.parametrize("use_context", [False, True], ids=["socket", "context"])
+def test_req0_recv_with_request_in_flight_interrupted_by_sigint(use_context):
+    snippet = f"""
+import pynng
+
+addr = "inproc://interrupt-req-in-flight"
+rep = pynng.Rep0(listen=addr)
+req = pynng.Req0(dial=addr)
+target = req.new_context() if {use_context} else req
+try:
+    target.send(b"never answered")
+    print("READY", flush=True)
+    target.recv()
+except KeyboardInterrupt:
+    print("INTERRUPTED", flush=True)
+finally:
+    req.close()
+    rep.close()
+"""
+    _run_subprocess_and_interrupt(snippet)

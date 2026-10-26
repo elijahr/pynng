@@ -16,7 +16,6 @@ import logging
 import math
 import os
 import threading
-import time
 import weakref
 
 import sniffio
@@ -91,20 +90,27 @@ _RECV_SLICE_MS = 100  # Slice duration for interruptable recv loop (ms)
 def _sliced_aio_recv(
     recv_fn, target_handle, lib, ffi, timeout_ms, slice_ms=_RECV_SLICE_MS
 ):
-    """Perform an interruptable receive using nng_aio with sliced timeouts.
+    """Perform an interruptable receive with a single nng_aio.
 
     CFFI releases the GIL when blocking in C. If a thread waits in a long or
     infinite C wait (e.g. pthread_cond_wait), Python signal handlers (such as
-    KeyboardInterrupt on Ctrl-C) are never triggered until C returns.
-    By slicing the wait into short intervals (default 100ms), Python's runtime
-    regularly regains the GIL to process pending signals.
+    KeyboardInterrupt on Ctrl-C) are never triggered until C returns. So the
+    aio completion sets a :class:`threading.Event`, and the wait for that event
+    is sliced into short intervals (default 100ms) so that Python's runtime
+    regularly runs pending signal handlers.
+
+    The aio stays in flight between slices. Cancelling a receive aborts a Req0
+    request and ends a Surveyor0 survey, so the aio is cancelled only when the
+    wait is interrupted. nng enforces ``timeout_ms`` and protocol deadlines
+    (such as the survey time) and reports both as ``NNG_ETIMEDOUT``.
 
     Args:
-        recv_fn: C function to initiate receive (e.g. nng_recv_aio, nng_socket_recv, nng_ctx_recv).
+        recv_fn: C function to initiate receive (e.g. nng_recv_aio,
+            nng_socket_recv, nng_ctx_recv).
         target_handle: CFFI socket or context handle.
         lib: CFFI library instance.
         ffi: CFFI ffi instance.
-        timeout_ms: Total timeout in milliseconds (-1 for infinite).
+        timeout_ms: Total timeout in milliseconds (-1 or None for infinite).
         slice_ms: Slice interval in milliseconds.
 
     Returns:
@@ -112,51 +118,40 @@ def _sliced_aio_recv(
     """
     from .exceptions import check_err
 
-    if timeout_ms is not None and timeout_ms >= 0:
-        deadline = time.monotonic() + (timeout_ms / 1000.0)
-    else:
-        deadline = None
+    if timeout_ms is None or timeout_ms < 0:
+        timeout_ms = -1
 
+    done = threading.Event()
+    key = id(done)
     aio_p = ffi.new("nng_aio **")
-    check_err(lib.nng_aio_alloc(aio_p, ffi.NULL, ffi.NULL))
+    check_err(
+        lib.nng_aio_alloc(aio_p, lib._async_complete, ffi.cast("void *", key)),
+        lib=lib,
+        ffi=ffi,
+    )
     aio = aio_p[0]
-
-    first_attempt = True
+    _aio._aio_map[key] = done.set
     try:
-        while True:
-            if deadline is None:
-                cur_slice = slice_ms
-            else:
-                now = time.monotonic()
-                if not first_attempt and now >= deadline:
-                    check_err(lib.NNG_ETIMEDOUT, lib=lib, ffi=ffi)
-                remaining_ms = int(math.ceil((deadline - now) * 1000.0))
-                cur_slice = max(0, min(remaining_ms, slice_ms))
-            first_attempt = False
-
-            t_start = time.monotonic()
-            lib.nng_aio_set_timeout(aio, cur_slice)
-            recv_fn(target_handle, aio)
+        lib.nng_aio_set_timeout(aio, timeout_ms)
+        recv_fn(target_handle, aio)
+        try:
+            while not done.wait(slice_ms / 1000.0):
+                pass
+        except BaseException:
+            lib.nng_aio_cancel(aio)
             lib.nng_aio_wait(aio)
-            err = lib.nng_aio_result(aio)
-            elapsed_slice = time.monotonic() - t_start
-
-            if err == lib.NNG_ETIMEDOUT:
-                if deadline is not None and time.monotonic() >= deadline:
-                    check_err(lib.NNG_ETIMEDOUT, lib=lib, ffi=ffi)
-                if cur_slice > 10 and elapsed_slice < (cur_slice * 0.8) / 1000.0:
-                    check_err(lib.NNG_ETIMEDOUT, lib=lib, ffi=ffi)
-                continue
-
-            check_err(err, lib=lib, ffi=ffi)
-            raw_msg = lib.nng_aio_get_msg(aio)
-            lib.nng_aio_set_msg(aio, ffi.NULL)
-            return raw_msg
-    except BaseException:
-        lib.nng_aio_cancel(aio)
+            if lib.nng_aio_result(aio) == 0:
+                lib.nng_msg_free(lib.nng_aio_get_msg(aio))
+                lib.nng_aio_set_msg(aio, ffi.NULL)
+            raise
+        # The callback can still be running after it set the event.
         lib.nng_aio_wait(aio)
-        raise
+        check_err(lib.nng_aio_result(aio), lib=lib, ffi=ffi)
+        raw_msg = lib.nng_aio_get_msg(aio)
+        lib.nng_aio_set_msg(aio, ffi.NULL)
+        return raw_msg
     finally:
+        _aio._aio_map.pop(key, None)
         lib.nng_aio_free(aio)
 
 
@@ -197,13 +192,25 @@ def to_char(charlike, add_null_term=False, ffi=None):
     return charlike
 
 
+_pipe_callback_thread = threading.local()
+
+
+def _in_pipe_callback():
+    """Return True if the current thread is running a pipe callback."""
+    return getattr(_pipe_callback_thread, "depth", 0) > 0
+
+
 def _do_callbacks(pipe, callbacks):
-    for cb in callbacks:
-        try:
-            cb(pipe)
-        except Exception:
-            msg = "Exception raised in pipe callback {!r}"
-            logger.exception(msg.format(cb))
+    _pipe_callback_thread.depth = getattr(_pipe_callback_thread, "depth", 0) + 1
+    try:
+        for cb in callbacks:
+            try:
+                cb(pipe)
+            except Exception:
+                msg = "Exception raised in pipe callback {!r}"
+                logger.exception(msg.format(cb))
+    finally:
+        _pipe_callback_thread.depth -= 1
 
 
 class _PipeState:
@@ -247,9 +254,9 @@ def _handle_pipe_event(sock, lib_pipe, event, lib):
       callback closed it.
 
     A callback must not wait for a later callback of the same pipe, because
-    that later callback waits for it to return. With nng v1 this includes
-    closing a socket from a connect callback: the close waits for nng's reaper
-    thread, which can be waiting in ``REM_POST`` for that callback.
+    that later callback waits for it to return. For this reason
+    :meth:`Socket.close` called from a pipe callback does not wait for the
+    socket to finish closing.
     """
     pipe_id = lib.nng_pipe_id(lib_pipe)
     me = threading.get_ident()
@@ -359,13 +366,15 @@ class PipeEventStream:
         """Thread-safe put of an event into the async queue."""
         if self._closed:
             return
-        if self._backend == "asyncio":
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
-        elif self._backend == "trio":
-            self._trio_token.run_sync_soon(
-                self._trio_send_nowait,
-                event,
-            )
+        # Both raise RuntimeError (trio.RunFinishedError is a subclass) once
+        # the event loop has finished, and then nothing can consume the event.
+        try:
+            if self._backend == "asyncio":
+                self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
+            elif self._backend == "trio":
+                self._trio_token.run_sync_soon(self._trio_send_nowait, event)
+        except RuntimeError:
+            pass
 
     def _trio_send_nowait(self, event):
         """Wrapper for send_nowait that suppresses ClosedResourceError.
@@ -618,6 +627,8 @@ class Socket:
         self._pipe_notify_cond = threading.Condition(self._pipe_notify_lock)
         self._socket_closed = False
         self._close_lock = threading.Lock()
+        self._close_done = threading.Event()
+        self._pool_lock = threading.Lock()
         self._async_backend = async_backend
         self._recv_pool = []
         self._send_pool = []
@@ -765,6 +776,12 @@ class Socket:
     def _do_close(self, close_fn):
         """Common close pattern used by both v1 and v2.
 
+        The first caller closes the socket, and other callers wait until that
+        close has finished. ``close_fn`` waits for running pipe callbacks to
+        return, so the lock is not held while it runs, and a caller that is
+        running a pipe callback never waits: it returns at once, and if it is
+        the first caller, the socket is closed on another thread.
+
         Args:
             close_fn: The NNG close function to call (e.g. lib.nng_close or
                 lib.nng_socket_close).
@@ -772,28 +789,47 @@ class Socket:
         if not hasattr(self, "_socket"):
             return
         with self._close_lock:
-            if self._socket_closed:
-                return
+            first = not self._socket_closed
             self._socket_closed = True
-        _lib = self._lib
-        key = (self._version_tag, _lib.nng_socket_id(self.socket))
-        # Deregister before close_fn: until then nng cannot give this id to
-        # another socket, so no other thread writes this key.
-        ref = _active_handles.get(key)
-        if ref is not None and (ref() is self or ref() is None):
-            _active_handles.pop(key, None)
-        close_fn(self.socket)
-        self._listeners = {}
-        self._dialers = {}
-        with self._pipe_notify_cond:
-            self._pipes.clear()
-            self._pipe_states.clear()
-            self._removed_pipe_ids.clear()
-            self._pipe_notify_cond.notify_all()
-        while self._recv_pool:
-            self._recv_pool.pop()._free()
-        while self._send_pool:
-            self._send_pool.pop()._free()
+        if not first:
+            if not _in_pipe_callback():
+                self._close_done.wait()
+            return
+        if _in_pipe_callback():
+            threading.Thread(
+                target=self._finish_close, args=(close_fn,), name="pynng-close"
+            ).start()
+        else:
+            self._finish_close(close_fn)
+
+    def _finish_close(self, close_fn):
+        try:
+            _lib = self._lib
+            key = (self._version_tag, _lib.nng_socket_id(self.socket))
+            # Deregister before close_fn: until then nng cannot give this id to
+            # another socket, so no other thread writes this key.
+            ref = _active_handles.get(key)
+            if ref is not None and (ref() is self or ref() is None):
+                _active_handles.pop(key, None)
+            close_fn(self.socket)
+            self._listeners = {}
+            self._dialers = {}
+            with self._pipe_notify_cond:
+                self._pipes.clear()
+                self._pipe_states.clear()
+                self._removed_pipe_ids.clear()
+                self._pipe_notify_cond.notify_all()
+            with self._pool_lock:
+                recv_helpers = list(self._recv_pool)
+                self._recv_pool.clear()
+                send_helpers = list(self._send_pool)
+                self._send_pool.clear()
+            for helper in recv_helpers:
+                helper._free()
+            for helper in send_helpers:
+                helper._free()
+        finally:
+            self._close_done.set()
 
     def __del__(self):
         if _is_nng_finalized():
@@ -943,48 +979,51 @@ class Socket:
     _MAX_POOL_SIZE = 32
 
     def _acquire_recv_helper(self):
-        pool = self._recv_pool
-        while pool:
-            helper = pool.pop()
+        while True:
+            with self._pool_lock:
+                if not self._recv_pool:
+                    break
+                helper = self._recv_pool.pop()
             if helper.is_valid_for_current_loop():
                 return helper
             helper._free()
         return _aio.AIOHelper(self, self._async_backend)
 
     def _release_recv_helper(self, helper):
-        if (
-            not self._socket_closed
-            and len(self._recv_pool) < self._MAX_POOL_SIZE
-            and helper.is_valid_for_current_loop()
-        ):
-            self._recv_pool.append(helper)
-        else:
-            helper._free()
+        if not self._socket_closed and helper.is_valid_for_current_loop():
+            with self._pool_lock:
+                pool = self._recv_pool
+                if not self._socket_closed and len(pool) < self._MAX_POOL_SIZE:
+                    pool.append(helper)
+                    return
+        helper._free()
 
     def _acquire_send_helper(self):
-        pool = self._send_pool
-        while pool:
-            helper = pool.pop()
+        while True:
+            with self._pool_lock:
+                if not self._send_pool:
+                    break
+                helper = self._send_pool.pop()
             if helper.is_valid_for_current_loop():
                 return helper
             helper._free()
         return _aio.AIOHelper(self, self._async_backend)
 
     def _release_send_helper(self, helper):
-        if (
-            not self._socket_closed
-            and len(self._send_pool) < self._MAX_POOL_SIZE
-            and helper.is_valid_for_current_loop()
-        ):
-            self._send_pool.append(helper)
-        else:
-            helper._free()
+        if not self._socket_closed and helper.is_valid_for_current_loop():
+            with self._pool_lock:
+                pool = self._send_pool
+                if not self._socket_closed and len(pool) < self._MAX_POOL_SIZE:
+                    pool.append(helper)
+                    return
+        helper._free()
 
     async def asend_msg(self, msg):
         """
         Asynchronously send the :class:`Message` ``msg`` on the socket.
 
         """
+        _check_fork()
         with msg._mem_freed_lock:
             msg._ensure_can_send()
             helper = self._acquire_send_helper()
@@ -997,6 +1036,7 @@ class Socket:
         """
         Asynchronously receive the :class:`Message` ``msg`` on the socket.
         """
+        _check_fork()
         helper = self._acquire_recv_helper()
         try:
             msg = await helper.arecv_msg()
@@ -1433,6 +1473,10 @@ class Context:
         # need to set attributes first, so that if anything goes wrong,
         # __del__() doesn't throw an AttributeError
         self._context = None
+        self._closed = False
+        self._pool_lock = threading.Lock()
+        self._recv_pool = []
+        self._send_pool = []
         assert isinstance(socket, Socket)
         self._socket = socket
         _ffi = socket._ffi
@@ -1441,8 +1485,6 @@ class Context:
 
         self._context = _ffi.new("nng_ctx *")
         check_err(_lib.nng_ctx_open(self._context, socket.socket))
-        self._recv_pool = []
-        self._send_pool = []
 
         assert _lib.nng_ctx_id(self.context) != -1
 
@@ -1457,42 +1499,44 @@ class Context:
     _MAX_POOL_SIZE = 32
 
     def _acquire_recv_helper(self):
-        pool = self._recv_pool
-        while pool:
-            helper = pool.pop()
+        while True:
+            with self._pool_lock:
+                if not self._recv_pool:
+                    break
+                helper = self._recv_pool.pop()
             if helper.is_valid_for_current_loop():
                 return helper
             helper._free()
         return _aio.AIOHelper(self, self._socket._async_backend)
 
     def _release_recv_helper(self, helper):
-        if (
-            self._context is not None
-            and len(self._recv_pool) < self._MAX_POOL_SIZE
-            and helper.is_valid_for_current_loop()
-        ):
-            self._recv_pool.append(helper)
-        else:
-            helper._free()
+        if not self._closed and helper.is_valid_for_current_loop():
+            with self._pool_lock:
+                pool = self._recv_pool
+                if not self._closed and len(pool) < self._MAX_POOL_SIZE:
+                    pool.append(helper)
+                    return
+        helper._free()
 
     def _acquire_send_helper(self):
-        pool = self._send_pool
-        while pool:
-            helper = pool.pop()
+        while True:
+            with self._pool_lock:
+                if not self._send_pool:
+                    break
+                helper = self._send_pool.pop()
             if helper.is_valid_for_current_loop():
                 return helper
             helper._free()
         return _aio.AIOHelper(self, self._socket._async_backend)
 
     def _release_send_helper(self, helper):
-        if (
-            self._context is not None
-            and len(self._send_pool) < self._MAX_POOL_SIZE
-            and helper.is_valid_for_current_loop()
-        ):
-            self._send_pool.append(helper)
-        else:
-            helper._free()
+        if not self._closed and helper.is_valid_for_current_loop():
+            with self._pool_lock:
+                pool = self._send_pool
+                if not self._closed and len(pool) < self._MAX_POOL_SIZE:
+                    pool.append(helper)
+                    return
+        helper._free()
 
     async def arecv(self):
         """Asynchronously receive data using this context."""
@@ -1660,14 +1704,27 @@ class Context:
         return self.send_msg(msg, block=block)
 
     def close(self):
-        """Close this context."""
+        """Close this context.
+
+        This method is idempotent and thread-safe.
+        """
         _lib = self._lib
 
         ctx_err = 0
-        while self._recv_pool:
-            self._recv_pool.pop()._free()
-        while self._send_pool:
-            self._send_pool.pop()._free()
+        # Marking the context closed under the pool lock means that a helper
+        # released after this point is freed, not put back into a pool.
+        with self._pool_lock:
+            if self._closed:
+                return
+            self._closed = True
+            recv_helpers = list(self._recv_pool)
+            self._recv_pool.clear()
+            send_helpers = list(self._send_pool)
+            self._send_pool.clear()
+        for helper in recv_helpers:
+            helper._free()
+        for helper in send_helpers:
+            helper._free()
         if self._context is not None:
             # check that nng still has a reference
             if _lib.nng_ctx_id(self.context) != -1:
@@ -1722,6 +1779,7 @@ class Context:
         """
         Asynchronously send the :class:`Message` ``msg`` on the context.
         """
+        _check_fork()
         with msg._mem_freed_lock:
             msg._ensure_can_send()
             helper = self._acquire_send_helper()
@@ -1734,6 +1792,7 @@ class Context:
         """
         Asynchronously receive a :class:`Message` on the context.
         """
+        _check_fork()
         helper = self._acquire_recv_helper()
         try:
             msg = await helper.arecv_msg()

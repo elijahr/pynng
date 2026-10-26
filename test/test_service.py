@@ -1,6 +1,8 @@
 """Tests for pynng.service.Rep0Service."""
 
 import asyncio
+import gc
+import logging
 import warnings
 
 import pytest
@@ -217,11 +219,17 @@ async def test_double_reply_raises_asyncio():
 def test_unreplied_request_warns():
     """A Request that goes out of scope without reply emits ResourceWarning."""
     with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
+        warnings.simplefilter("always", ResourceWarning)
         r = Request(b"test-data", None)
         del r
-        # ResourceWarning may or may not fire depending on GC timing,
-        # so we just verify the class works without errors.
+        gc.collect()
+        resource_warnings = [
+            item for item in w if issubclass(item.category, ResourceWarning)
+        ]
+        assert len(resource_warnings) == 1
+        assert "Request with data b'test-data' was never replied to" in str(
+            resource_warnings[0].message
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -305,3 +313,59 @@ async def test_aenter_initialization_failure_cleans_up_socket(monkeypatch):
 
     assert service._socket is None
 
+
+# ---------------------------------------------------------------------------
+# recv_timeout expiry in workers
+# ---------------------------------------------------------------------------
+
+
+def _service_errors(caplog):
+    return [
+        r
+        for r in caplog.records
+        if r.name == "pynng.service" and r.levelno >= logging.ERROR
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recv_timeout_expiry_logs_no_error_asyncio(caplog):
+    """Workers wait through recv_timeout expiries without logging errors."""
+    addr = _unique_addr("recv-timeout-quiet-asyncio")
+    caplog.set_level(logging.ERROR, logger="pynng.service")
+
+    async with Rep0Service(
+        addr, workers=2, recv_timeout=50, send_timeout=1000
+    ) as service:
+        # Several recv_timeout periods pass with no request.
+        await asyncio.sleep(0.3)
+        with pynng.Req0(dial=addr, recv_timeout=2000, send_timeout=2000) as req:
+            wait_pipe_len(req, 1)
+            await req.asend(b"after-timeouts")
+            request = await asyncio.wait_for(service.__anext__(), 2)
+            assert request.data == b"after-timeouts"
+            await request.reply(b"served")
+            assert (await req.arecv()) == b"served"
+
+    assert _service_errors(caplog) == []
+
+
+@pytest.mark.trio
+async def test_recv_timeout_expiry_logs_no_error_trio(caplog):
+    """Workers wait through recv_timeout expiries without logging errors (trio)."""
+    addr = _unique_addr("recv-timeout-quiet-trio")
+    caplog.set_level(logging.ERROR, logger="pynng.service")
+
+    async with Rep0Service(
+        addr, workers=2, recv_timeout=50, send_timeout=1000
+    ) as service:
+        await trio.sleep(0.3)
+        with pynng.Req0(dial=addr, recv_timeout=2000, send_timeout=2000) as req:
+            wait_pipe_len(req, 1)
+            await req.asend(b"after-timeouts")
+            with trio.fail_after(2):
+                request = await service.__anext__()
+            assert request.data == b"after-timeouts"
+            await request.reply(b"served")
+            assert (await req.arecv()) == b"served"
+
+    assert _service_errors(caplog) == []

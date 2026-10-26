@@ -305,10 +305,14 @@ async def test_dialer_async_context_manager_trio():
 async def test_listener_async_context_manager_trio():
     """Listener can be used as an async context manager with trio."""
     addr = random_addr()
-    with pynng.Pair0() as sock:
-        async with sock.listen(addr) as listener:
-            assert listener is not None
-        # after exiting async with, listener is closed
+    with pynng.Pair0(recv_timeout=FAST_TIMEOUT) as sock:
+        async with sock.listen(addr):
+            with pynng.Pair0(dial=addr, send_timeout=FAST_TIMEOUT) as peer:
+                await peer.asend(b"hello-trio-listener")
+                assert (await sock.arecv()) == b"hello-trio-listener"
+        # The listener is closed, so nothing can connect to the address.
+        with pytest.raises(pynng.ConnectionRefused):
+            pynng.Pair0(dial=addr, block_on_dial=True)
 
 
 @pytest.mark.trio
@@ -352,9 +356,14 @@ async def test_dialer_async_context_manager_asyncio():
 async def test_listener_async_context_manager_asyncio():
     """Listener can be used as an async context manager with asyncio."""
     addr = random_addr()
-    with pynng.Pair0() as sock:
-        async with sock.listen(addr) as listener:
-            assert listener is not None
+    with pynng.Pair0(recv_timeout=FAST_TIMEOUT) as sock:
+        async with sock.listen(addr):
+            with pynng.Pair0(dial=addr, send_timeout=FAST_TIMEOUT) as peer:
+                await peer.asend(b"hello-asyncio-listener")
+                assert (await sock.arecv()) == b"hello-asyncio-listener"
+        # The listener is closed, so nothing can connect to the address.
+        with pytest.raises(pynng.ConnectionRefused):
+            pynng.Pair0(dial=addr, block_on_dial=True)
 
 
 @pytest.mark.asyncio
@@ -380,4 +389,3 @@ async def test_listener_aclose_asyncio():
         assert listener.id not in sock._listeners
         # Calling aclose again should be idempotent (no error)
         await listener.aclose()
-

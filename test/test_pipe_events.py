@@ -1,9 +1,12 @@
 """Tests for async pipe event streams."""
 
 import asyncio
+import logging
+import threading
 
 import pytest
 import trio
+from conftest import random_addr
 
 import pynng
 from pynng import PipeEvent, PipeEventStream
@@ -276,3 +279,26 @@ async def test_pipe_events_remove_on_local_socket_close(nng):
     finally:
         stream.close()
         s0.close()
+
+
+async def _open_pipe_event_stream(sock):
+    return sock.pipe_events()
+
+
+@pytest.mark.parametrize("backend", ["asyncio", "trio"])
+def test_pipe_event_after_event_loop_finished_logs_no_error(backend, caplog):
+    """A stream left open after its event loop ends drops events quietly."""
+    addr = random_addr()
+    with pynng.Pair0(listen=addr) as sock:
+        if backend == "asyncio":
+            stream = asyncio.run(_open_pipe_event_stream(sock))
+        else:
+            stream = trio.run(_open_pipe_event_stream, sock)
+        # Registered after the stream's callbacks, so it runs after them.
+        stream_callbacks_ran = threading.Event()
+        sock.add_post_pipe_connect_cb(lambda pipe: stream_callbacks_ran.set())
+        with caplog.at_level(logging.ERROR), pynng.Pair0(dial=addr):
+            assert stream_callbacks_ran.wait(5)
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert errors == []
+        stream.close()

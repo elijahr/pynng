@@ -49,8 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scope cibuildwheel tests to exclude build-system tests (run in smoketest instead)
 - Python 3.10 EOL deprecation advisory in documentation and README
 - Modernize GitHub Actions workflows to Node 24-compatible actions
-- Pipe callbacks for one pipe no longer run at the same time: `post_pipe_remove` callbacks wait until the running `pre_pipe_connect` and `post_pipe_connect` callbacks for that pipe return (with nng v1 they could run concurrently on the reaper thread). A pipe callback must not wait for a later callback of the same pipe; with nng v1 this includes closing a socket from a connect callback, because the close waits for the reaper thread
+- Pipe callbacks for one pipe no longer run at the same time: `post_pipe_remove` callbacks wait until the running `pre_pipe_connect` and `post_pipe_connect` callbacks for that pipe return (with nng v1 they could run concurrently on the reaper thread). A pipe callback must not wait for a later callback of the same pipe
 - Remove the unused internal C function `pynng_aio_entry_set_queue` from the completion queue engine. It could not keep the queue reference counts correct for an entry that was in a queue
+- A synchronous receive (`recv()`, `recv_msg()`, `recv_into()`) on a socket or context now keeps one receive in flight until it completes, times out, or is interrupted. Before, it cancelled and restarted the receive every 100 ms, which ends a `Req0` request and a `Surveyor0` survey: a `Req0` receive whose reply took longer than 100 ms raised `BadState`, and a `Surveyor0` receive raised `Timeout` after about 100 ms, whatever the `survey_time`. Ctrl-C still interrupts a blocking receive
+- `Socket.close()` called while another thread closes the socket now returns only after the socket is closed. Before, it returned at once
+- `Socket.close()` called from a pipe callback now returns at once, and the socket is closed on another thread when the running pipe callbacks have returned. Before, a close from a socket's own `post_pipe_connect` callback, or from a `post_pipe_remove` callback when no other thread was closing the socket, never returned
 
 ### Fixed
 - Prevent removed pipes from staying in `Socket.pipes` with nng v1: when `NNG_PIPE_EV_REM_POST` from the reaper thread reaches Python before `NNG_PIPE_EV_ADD_PRE` or `NNG_PIPE_EV_ADD_POST` for the same pipe, the late event is now dropped, so it no longer adds the pipe back or runs `post_pipe_connect` callbacks after `post_pipe_remove` callbacks. A message received from a removed pipe also no longer adds the pipe back
@@ -63,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Write the wake-up byte of the completion queue while the queue lock is held, so a completion that races with `MPSCAIOEngine.close()` cannot write to the wake-up pipe after its file descriptor is closed and possibly reused
 - Prevent `MPSCAIOEngine.register()` from reusing a slot id that is still pending when the 31-bit slot counter (mask `0x7FFFFFFF`) wraps around
 - Free the C string from nng in `_getopt_string` also when UTF-8 decoding fails
+- `Rep0Service` workers no longer log an exception each time `recv_timeout` expires with no request
+- `Socket.asend_msg()`, `Socket.arecv_msg()`, `Context.asend_msg()` and `Context.arecv_msg()` (and so `arecv()`, `arecv_into()` and `async for`) now raise `RuntimeError` in a forked child, as the synchronous operations already did
+- A `PipeEventStream` whose event loop has finished now drops pipe events without logging an exception
+- Access to the pooled async helpers of `Socket` and `Context` is now serialized, so a thread no longer gets `IndexError` when another thread takes the last pooled helper at the same time, and a helper released while the socket or context closes is freed instead of left in the pool
+- `Context.close()` is now thread-safe: when two threads close a context at the same time, nng closes it once
 - Fix #108: Prevent process crash / NNG panic during Python interpreter shutdown by disabling unconditional `nng_fini()` at atexit (`nng_fini_at_exit = False`) and guarding `Socket`, `Context`, `Message`, `AIOHelper`, and `DeviceAIO` finalizers against calling deallocated NNG C state during GC
 - Fix #113: Prevent hard C aborts (`panic: nng is not fork-reentrant safe`) in forked child processes by detecting `fork()` and raising a descriptive Python `RuntimeError` directing users to `multiprocessing.set_start_method('spawn')`
 - Fix #104: Prevent `RuntimeError: cannot use unpack() on <cdata 'char *' NULL>` when receiving 0-byte messages via v1 `Socket.recv()`

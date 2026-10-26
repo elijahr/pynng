@@ -121,6 +121,11 @@ class Socket(_base.Socket):
 
         This method is idempotent and thread-safe. Uses ``nng_socket_close()``
         (the v2 API).
+
+        When it returns, the socket is closed, also if another thread closed
+        it first. The exception is a call from a pipe callback: it returns at
+        once, and the socket finishes closing on another thread after the
+        running pipe callbacks return.
         """
         self._do_close(lib.nng_socket_close)
 
