@@ -23,7 +23,7 @@ import sniffio
 
 from . import options
 from . import _aio
-from .exceptions import NNGException
+from .exceptions import NNGException, TryAgain, check_err
 from ._finalized import (
     is_nng_finalized as _is_nng_finalized,
     retain_closed as _retain_closed,
@@ -925,19 +925,20 @@ class Socket:
     def send_msg(self, msg, block=True):
         """Send the :class:`Message` ``msg`` on the socket."""
         _lib = self._lib
-        from .exceptions import check_err
 
         flags = 0
         if not block:
             flags |= _lib.NNG_FLAG_NONBLOCK
         with msg._mem_freed_lock:
             msg._ensure_can_send()
-            check_err(
-                _lib.nng_sendmsg(self.socket, msg._nng_msg, flags),
-                lib=_lib,
-                ffi=self._ffi,
-            )
+            # Give up ownership before the call: a KeyboardInterrupt raised as
+            # nng_sendmsg returns must not leave the Message owning a msg that
+            # nng consumed. If it lands after a failed send, the msg leaks.
             msg._mem_freed = True
+            err = _lib.nng_sendmsg(self.socket, msg._nng_msg, flags)
+            if err != 0:
+                msg._mem_freed = False
+                check_err(err, lib=_lib, ffi=self._ffi)
 
     _MAX_POOL_SIZE = 32
 
@@ -1611,7 +1612,6 @@ class Context:
         """Synchronously send the :class:`Message` ``msg`` on the context."""
         _ffi = self._ffi
         _lib = self._lib
-        from .exceptions import check_err, TryAgain
 
         with msg._mem_freed_lock:
             msg._ensure_can_send()
@@ -1622,22 +1622,31 @@ class Context:
                 ffi=_ffi,
             )
             aio = aio_p[0]
+            # The aio, not a Python flag, records who owns the msg: nng clears
+            # the aio's msg when it consumes it. Ownership is given up first
+            # and taken back in finally, so an exception at any point (such as
+            # KeyboardInterrupt) can at worst leak the msg, never free it twice.
+            msg._mem_freed = True
+            send_started = False
             try:
                 _lib.nng_aio_set_msg(aio, msg._nng_msg)
                 if not block:
                     _lib.nng_aio_set_timeout(aio, 0)
+                send_started = True
                 _lib.nng_ctx_send(self.context, aio)
                 _lib.nng_aio_wait(aio)
                 res = _lib.nng_aio_result(aio)
                 if res != 0:
-                    # nng retains the message on the aio when send fails; detach it
-                    # so Message retains ownership and frees it in __del__ (or allows retry).
-                    _lib.nng_aio_set_msg(aio, _ffi.NULL)
                     if not block and res == _lib.NNG_ETIMEDOUT:
                         raise TryAgain("Context send buffer full", _lib.NNG_EAGAIN)
                     check_err(res, lib=_lib, ffi=_ffi)
-                msg._mem_freed = True
             finally:
+                if send_started:
+                    _lib.nng_aio_cancel(aio)
+                    _lib.nng_aio_wait(aio)
+                if _lib.nng_aio_get_msg(aio) != _ffi.NULL:
+                    _lib.nng_aio_set_msg(aio, _ffi.NULL)
+                    msg._mem_freed = False
                 _lib.nng_aio_free(aio)
 
     def send(self, data, block=True):
@@ -1653,7 +1662,6 @@ class Context:
     def close(self):
         """Close this context."""
         _lib = self._lib
-        from .exceptions import check_err
 
         ctx_err = 0
         while self._recv_pool:

@@ -1,12 +1,17 @@
 import asyncio
+import errno
+import gc
 import itertools
+import os
+import threading
+import weakref
 
 import pytest
 import trio
+from conftest import FAST_TIMEOUT, MEDIUM_TIMEOUT, SLOW_TIMEOUT, random_addr
 
 import pynng
-
-from conftest import random_addr, FAST_TIMEOUT, MEDIUM_TIMEOUT, SLOW_TIMEOUT
+from pynng._aio import AIOHelper, MPSCAIOEngine, ffi, lib
 
 
 @pytest.mark.asyncio
@@ -383,3 +388,123 @@ async def test_device_aio_cancellation_with_mpsc():
             await task
         assert dev.aio is None
         assert dev._aio_entry is None
+
+
+def test_mpsc_queue_stays_valid_until_last_entry_is_freed():
+    """Cyclic GC can finalize MPSCAIOEngine (which frees its queue) before an
+    AIOHelper whose entry still points at that queue. Freeing the helper then
+    cancels its aio, which delivers a completion to the queue.
+    """
+    q = lib.pynng_mpsc_queue_new(-1)
+    e = lib.pynng_aio_entry_new(ffi.NULL, 7, q)
+    lib.pynng_mpsc_queue_free(q)
+    lib.pynng_native_aio_complete(e)
+    # A closed queue accepts no completion, so freeing the entry releases the
+    # last reference and frees the queue.
+    assert lib.pynng_aio_entry_is_idle(e) == 1
+    lib.pynng_aio_entry_free(e)
+
+
+def _fill_pipe(w):
+    os.set_blocking(w, False)
+    chunk = 65536
+    while chunk:
+        try:
+            os.write(w, b"\0" * chunk)
+        except OSError as e:
+            if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.ENOSPC):
+                raise
+            chunk //= 2
+    os.set_blocking(w, True)
+
+
+def test_mpsc_queue_close_waits_for_wake_byte_write():
+    """MPSCAIOEngine.close() closes the wake pipe after pynng_mpsc_queue_close
+    returns. A completion must not write to the fd after that, because the fd
+    number can already belong to another file.
+    """
+    r, w = os.pipe()
+    q = ffi.NULL
+    completer = closer = None
+    try:
+        # A full blocking pipe holds the completing thread inside write().
+        _fill_pipe(w)
+        q = lib.pynng_mpsc_queue_new(w)
+        e = lib.pynng_aio_entry_new(ffi.NULL, 1, q)
+        completer = threading.Thread(target=lib.pynng_native_aio_complete, args=(e,))
+        completer.start()
+        while lib.pynng_aio_entry_is_idle(e):
+            pass
+        closer = threading.Thread(target=lib.pynng_mpsc_queue_close, args=(q,))
+        closer.start()
+        closer.join(0.5)
+        close_returned_during_write = not closer.is_alive()
+    finally:
+        os.set_blocking(r, False)
+        for t in (completer, closer):
+            while t is not None and t.is_alive():
+                try:
+                    os.read(r, 65536)
+                except BlockingIOError:
+                    pass
+                t.join(0.01)
+        if q != ffi.NULL:
+            lib.pynng_aio_entry_free(e)
+            lib.pynng_mpsc_queue_free(q)
+        os.close(r)
+        os.close(w)
+    assert close_returned_during_write is False
+
+
+def test_mpsc_queue_keeps_every_completion_beyond_initial_capacity():
+    """No completion may be dropped while the consumer has not drained yet;
+    a dropped completion leaves its awaiting future pending forever.
+    """
+    q = lib.pynng_mpsc_queue_new(-1)
+    entries = [lib.pynng_aio_entry_new(ffi.NULL, i, q) for i in range(1, 1001)]
+    try:
+        for e in entries:
+            lib.pynng_native_aio_complete(e)
+        out = ffi.new("uintptr_t[2000]")
+        count = lib.pynng_mpsc_drain_batch(q, out, 2000)
+        assert [out[i] for i in range(count)] == list(range(1, 1001))
+    finally:
+        for e in entries:
+            lib.pynng_aio_entry_free(e)
+        lib.pynng_mpsc_queue_free(q)
+
+
+def test_aio_entry_set_queue_is_not_exported():
+    """Moving an entry between queues cannot keep the queue reference counts
+    right while the entry is queued, so the function does not exist.
+    """
+    assert not hasattr(lib, "pynng_aio_entry_set_queue")
+
+
+@pytest.mark.asyncio
+async def test_aio_helper_keeps_its_socket_alive():
+    """AIOHelper.obj is a strong reference: a pooled helper resolves the
+    socket's message class after the caller dropped the socket.
+    """
+    sock = pynng.Pair0()
+    sock_ref = weakref.ref(sock)
+    helper = AIOHelper(sock, "asyncio")
+    del sock
+    try:
+        gc.collect()
+        assert sock_ref() is not None
+        assert helper.obj is sock_ref()
+    finally:
+        helper._free()
+        if sock_ref() is not None:
+            sock_ref().close()
+
+
+def test_mpsc_engine_register_skips_occupied_slots_on_wraparound():
+    engine = MPSCAIOEngine.__new__(MPSCAIOEngine)
+    pending = object()
+    new = object()
+    engine._slots = {1: pending}
+    engine._slot_counter = 0x7FFFFFFF
+    assert engine.register(new) == 2
+    assert engine._slots == {1: pending, 2: new}

@@ -135,9 +135,12 @@ class MPSCAIOEngine:
                     fut.set_result(None)
 
     def register(self, fut):
-        self._slot_counter = (self._slot_counter + 1) & 0x7FFFFFFF
-        if self._slot_counter == 0:
-            self._slot_counter = 1
+        while True:
+            self._slot_counter = (self._slot_counter + 1) & 0x7FFFFFFF
+            if self._slot_counter == 0:
+                self._slot_counter = 1
+            if self._slot_counter not in self._slots:
+                break
         slot_id = self._slot_counter
         self._slots[slot_id] = fut
         return slot_id
@@ -185,6 +188,8 @@ class MPSCAIOEngine:
     def __del__(self):
         try:
             self.close()
+            # Entries still held by AIOHelper/DeviceAIO keep a reference on the
+            # C queue, so it is freed when the last of them is freed.
             if getattr(self, "_queue", None) not in (None, self._ffi.NULL):
                 self._lib.pynng_mpsc_queue_free(self._queue)
                 self._queue = self._ffi.NULL

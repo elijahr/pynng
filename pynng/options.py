@@ -175,9 +175,10 @@ def _getopt_string(py_obj, option):
     obj, lib_func = _get_inst_and_func(py_obj, "string", "get")
     ret = lib_func(obj, opt_as_char, opt)
     pynng.check_err(ret)
-    py_string = _ffi.string(opt[0]).decode()
-    _lib.nng_strfree(opt[0])
-    return py_string
+    try:
+        return _ffi.string(opt[0]).decode()
+    finally:
+        _lib.nng_strfree(opt[0])
 
 
 def _setopt_string(py_obj, option, value):
