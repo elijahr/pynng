@@ -1,8 +1,11 @@
 import contextlib
 import gc
 import io
+import json
 import pathlib
 import platform
+import subprocess
+import sys
 import time
 import warnings
 
@@ -380,3 +383,40 @@ def test_pynng_sources_compile_without_syntax_warnings():
         with warnings.catch_warnings():
             warnings.simplefilter("error", SyntaxWarning)
             compile(source.read_text(), str(source), "exec")
+
+
+def test_star_import_exports_the_public_names(tmp_path):
+    """__all__ names every public attribute of pynng except the importlib
+    helpers, and every name in it resolves."""
+    code = """
+import json
+import pynng
+
+namespace = {}
+exec("from pynng import *", namespace)
+public = {name for name in vars(pynng) if not name.startswith("_")}
+public |= {
+    name for name, value in vars(type(pynng)).items() if isinstance(value, property)
+}
+print(json.dumps({
+    "all": list(pynng.__all__),
+    "star": sorted(set(namespace) - {"__builtins__"}),
+    "public": sorted(public),
+    "unresolved": [name for name in pynng.__all__ if not hasattr(pynng, name)],
+}))
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result = json.loads(proc.stdout)
+
+    assert result["unresolved"] == []
+    assert len(result["all"]) == len(set(result["all"]))
+    assert sorted(result["all"]) == sorted(
+        set(result["public"]) - {"version", "PackageNotFoundError"}
+    )
+    assert result["star"] == sorted(result["all"])

@@ -105,6 +105,8 @@ class InAddr(SockAddr):
         return self._mem.sa_addr
 
     def __str__(self):
+        # nng_sockaddr_in.sa_addr is stored in network byte order in host memory,
+        # so native-order packing preserves the raw network byte sequence for inet_ntop.
         as_bytes = struct.pack("I", self.addr)
         ip = socket.inet_ntop(socket.AF_INET, as_bytes)
         port = socket.ntohs(self.port)

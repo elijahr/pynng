@@ -8,11 +8,10 @@ This directory contains examples on using pynng for different tasks.
    Adapted from [nng pair example](https://nanomsg.org/gettingstarted/nng/pair.html).
 * Polyamorous pair1 connection :  
    - [`pair1_async.py`](./pair1_async.py): Demonstrates using trio.
-   - [`pair1_async_curio.py`](./pair1_async.py): Demonstrates using curio.
 * Pipeline (A One-Way Pipe) :
-   [`pipeline.py`](./pair1_async.py): Push/Pull adapted from [nng example](https://nanomsg.org/gettingstarted/nng/pipeline.html)
+   [`pipeline.py`](./pipeline.py): Push/Pull adapted from [nng example](https://nanomsg.org/gettingstarted/nng/pipeline.html)
 * Request/Reply (I ask, you answer) :
-   [`reqprep.py`](./reqprep.py): Rep0/Req0 adapted from [nng example](https://nanomsg.org/gettingstarted/nng/pipeline.html)
+   [`reqprep.py`](./reqprep.py): Rep0/Req0 adapted from [nng example](https://nanomsg.org/gettingstarted/nng/reqrep.html)
 * Pub/Sub (Topics & Broadcast):
    [`pubsub.py`](./pubsub.py): Pub0/Sub0 adapted from [nng example](https://nanomsg.org/gettingstarted/nng/pubsub.html)
 * Survey (Everybody Votes):

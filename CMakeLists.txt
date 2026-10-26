@@ -306,9 +306,10 @@ endif()
 set_target_properties(_nng PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 
 # Suppress incompatible-pointer-types errors in CFFI-generated code.
-# The NNG API uses const-qualified pointer-to-pointer params (e.g. const nng_url **)
-# but the generated CFFI cdef doesn't carry the const qualifier yet.
-# TODO: Fix const handling in headerkit cdef writer and remove this workaround.
+# The generated CFFI cdef does not always match the pointer types in the nng
+# headers: headerkit's cdef writer adds a pointer level to function-pointer
+# struct fields (e.g. malloc_fn in nng v2's nng_init_params).
+# TODO: Fix the pointer types in headerkit's cdef writer and remove this workaround.
 if(MSVC)
   target_compile_options(_nng PRIVATE /std:c11 /experimental:c11atomics)
 else()

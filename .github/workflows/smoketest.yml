@@ -7,20 +7,24 @@ on:
     # workflow since they don't affect runtime behavior.
     paths:
       - 'pynng/**'
+      - 'src/**'
       - 'build_pynng.py'
       - 'test/**'
       - 'pyproject.toml'
       - 'CMakeLists.txt'
-      - 'patches/**'
+      - '_nng_cdef_cache.txt'
+      - '_nng_v2_cdef_cache.txt'
       - '.github/workflows/smoketest.yml'
   pull_request:
     paths:
       - 'pynng/**'
+      - 'src/**'
       - 'build_pynng.py'
       - 'test/**'
       - 'pyproject.toml'
       - 'CMakeLists.txt'
-      - 'patches/**'
+      - '_nng_cdef_cache.txt'
+      - '_nng_v2_cdef_cache.txt'
       - '.github/workflows/smoketest.yml'
 
 concurrency:
@@ -56,9 +60,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/sccache
-          key: ${{ matrix.os }}-sccache-${{ hashFiles('CMakeLists.txt', 'pyproject.toml', 'build_pynng.py', 'patches/**') }}-${{ github.sha }}
+          key: ${{ matrix.os }}-sccache-${{ hashFiles('CMakeLists.txt', 'pyproject.toml', 'build_pynng.py', 'src/**') }}-${{ github.sha }}
           restore-keys: |
-            ${{ matrix.os }}-sccache-${{ hashFiles('CMakeLists.txt', 'pyproject.toml', 'build_pynng.py', 'patches/**') }}-
+            ${{ matrix.os }}-sccache-${{ hashFiles('CMakeLists.txt', 'pyproject.toml', 'build_pynng.py', 'src/**') }}-
             ${{ matrix.os }}-sccache-
       - run: sudo apt-get install -y --no-install-recommends ninja-build libclang-dev || (sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ninja-build libclang-dev)
       - name: Build wheel
@@ -124,9 +128,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/sccache
-          key: ubuntu-latest-pypy-sccache-${{ hashFiles('CMakeLists.txt', 'pyproject.toml', 'build_pynng.py', 'patches/**') }}-${{ github.sha }}
+          key: ubuntu-latest-pypy-sccache-${{ hashFiles('CMakeLists.txt', 'pyproject.toml', 'build_pynng.py', 'src/**') }}-${{ github.sha }}
           restore-keys: |
-            ubuntu-latest-pypy-sccache-${{ hashFiles('CMakeLists.txt', 'pyproject.toml', 'build_pynng.py', 'patches/**') }}-
+            ubuntu-latest-pypy-sccache-${{ hashFiles('CMakeLists.txt', 'pyproject.toml', 'build_pynng.py', 'src/**') }}-
             ubuntu-latest-pypy-sccache-
       - run: sudo apt-get install -y --no-install-recommends ninja-build libclang-dev || (sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ninja-build libclang-dev)
       - name: Build and install with test deps
@@ -163,3 +167,68 @@ jobs:
           -C cmake.args="-DPYNNG_TLS_ENGINE=${{ matrix.tls-engine }}"
       - name: Run TLS tests
         run: uv run --no-project pytest -v -m requires_tls test
+
+  # Run the build-system tests against the headers of a source build. They
+  # include the check that the committed cdef caches match headerkit's output.
+  build-system:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+      - run: sudo apt-get install -y --no-install-recommends ninja-build libclang-dev || (sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ninja-build libclang-dev)
+      - name: Build and install with test deps
+        run: uv pip install --system -v -e '.[dev]'
+      - name: Run build-system tests
+        env:
+          NNG_INCLUDE_DIR: ${{ github.workspace }}/build/cpython-312/_deps/nng-src/include
+          NNG_V2_INCLUDE_DIR: ${{ github.workspace }}/build/cpython-312/nng_v2_install/include
+        run: pytest -v -rs test/test_build.py
+
+  # Build the sdist and install it with Python 3.10. headerkit does not support
+  # Python 3.10, so this build reads the committed cdef caches.
+  sdist-py310:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    name: "sdist on Python 3.10 (${{ matrix.os }})"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+          architecture: x64
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends ninja-build || (sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ninja-build)
+      - name: Build sdist
+        run: uv build --sdist -o dist/
+      - name: Install the sdist with Python 3.10
+        run: |
+          uv venv --python 3.10 "$RUNNER_TEMP/venv"
+          uv pip install --python "$RUNNER_TEMP/venv" -v dist/*.tar.gz pytest pytest-asyncio pytest-trio trio
+      - name: Run tests
+        run: |
+          py="$RUNNER_TEMP/venv/bin/python"
+          [ -x "$py" ] || py="$RUNNER_TEMP/venv/Scripts/python.exe"
+          "$py" -m pytest -v test --ignore=test/test_build.py --ignore=test/test_check_nng_updates.py

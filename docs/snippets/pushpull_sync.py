@@ -6,7 +6,6 @@ addr = "tcp://127.0.0.1:31313"
 with Push0(listen=addr) as push, Pull0(dial=addr, recv_timeout=100) as pull0, Pull0(
     dial=addr, recv_timeout=100
 ) as pull1:
-    pass
     # give some time to connect
     time.sleep(0.01)
     push.send(b"hi some node")

@@ -23,7 +23,9 @@ Build Requirements
 pynng uses `scikit-build-core <https://scikit-build-core.readthedocs.io>`_ and
 `headerkit <https://github.com/axiomantic/headerkit>`_ for building. The build
 process parses NNG C headers to auto-generate CFFI bindings, which requires
-``libclang`` at build time.
+``libclang`` at build time. headerkit requires Python 3.11+; a build with
+Python 3.10 uses CFFI declarations that are pre-generated for the bundled nng
+versions and does not need ``libclang``.
 
 On Ubuntu/Debian:
 
@@ -92,11 +94,14 @@ Troubleshooting
 macOS: ``llvm-ranlib`` error
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If the build fails with an error related to ``llvm-ranlib``, you may need to
-install LLVM via Homebrew and configure your path:
+If the build fails with an error related to ``llvm-ranlib`` or static archive
+symbol indexing on macOS, either configure CMake to use Apple's system ``ranlib``
+or ensure Homebrew LLVM's bin directory is on your ``PATH``:
 
 .. code-block:: bash
 
+   pip install -Ccmake.define.CMAKE_RANLIB=/usr/bin/ranlib .
+   # Or when using Homebrew LLVM:
    brew install llvm
    export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 

@@ -107,7 +107,8 @@ jobs:
           1. Review [nng changelog](https://github.com/nanomsg/nng/releases/tag/$LATEST_TAG)
           2. Update fork if needed: \`https://github.com/elijahr/nng\`
           3. Update \`NNG_REV\` in \`CMakeLists.txt\`
-          4. Run full test suite
+          4. Regenerate the cdef caches with \`scripts/update_cdef_cache.py\`
+          5. Run full test suite
 
           **Workflow run:** $run_url
           EOF

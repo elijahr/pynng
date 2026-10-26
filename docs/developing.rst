@@ -21,6 +21,21 @@ Install for development with:
 
    uv pip install -e '.[dev]'
 
+headerkit requires Python 3.11+. With Python 3.10, step 2 reads the CFFI
+declarations from the committed cdef caches ``_nng_cdef_cache.txt`` and
+``_nng_v2_cdef_cache.txt`` instead, and fails if the nng headers differ from
+the headers that a cache was generated from. Regenerate the caches with Python
+3.11+ after a change to the bundled nng versions, the exclude patterns or the
+cdef post-processing in ``build_pynng.py``, or headerkit:
+
+.. code-block:: bash
+
+   python scripts/update_cdef_cache.py \
+       --v1-include build/cpython-312/_deps/nng-src/include \
+       --v2-include build/cpython-312/nng_v2_install/include
+
+``test/test_build.py`` fails when a cache differs from headerkit's output.
+
 Build Options
 -------------
 

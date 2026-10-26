@@ -1,5 +1,7 @@
 # provide the API
-from importlib.metadata import version, PackageNotFoundError
+import sys as _sys
+import types as _types
+from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("pynng")
@@ -44,11 +46,11 @@ from .nng import (
     device,
     adevice,
     nng_fini,
-    nng_fini_at_exit,
 )
+from . import nng as _nng_module
 
-from .stats import stats, Stat
-from .service import Rep0Service, Request  # noqa: F401
+from .stats import stats, socket_stats, Stat
+from .service import Rep0Service, Request
 from .tls import TLSConfig
 
 from .exceptions import (
@@ -88,3 +90,104 @@ from .exceptions import (
     check_err,
     MessageStateError,
 )
+
+__all__ = (
+    "AddressInUse",
+    "AddressInvalid",
+    "AlreadyExists",
+    "Ambiguous",
+    "AuthenticationError",
+    "BadState",
+    "BadType",
+    "Bus0",
+    "Busy",
+    "Canceled",
+    "Closed",
+    "ConnectionAborted",
+    "ConnectionRefused",
+    "ConnectionReset",
+    "Context",
+    "CryptoError",
+    "DestinationUnreachable",
+    "Dialer",
+    "Internal",
+    "Interrupted",
+    "InvalidOperation",
+    "Listener",
+    "Message",
+    "MessageStateError",
+    "MessageTooLarge",
+    "NNGException",
+    "NoArgument",
+    "NoEntry",
+    "NoMemory",
+    "NotSupported",
+    "OutOfFiles",
+    "OutOfSpace",
+    "Pair0",
+    "Pair1",
+    "PermissionDenied",
+    "Pipe",
+    "PipeEvent",
+    "PipeEventStream",
+    "ProtocolError",
+    "Pub0",
+    "Pull0",
+    "Push0",
+    "RawBus0",
+    "RawPair0",
+    "RawPair1",
+    "RawPub0",
+    "RawPull0",
+    "RawPush0",
+    "RawRep0",
+    "RawReq0",
+    "RawRespondent0",
+    "RawSub0",
+    "RawSurveyor0",
+    "ReadOnly",
+    "Rep0",
+    "Rep0Service",
+    "Req0",
+    "Request",
+    "Respondent0",
+    "Socket",
+    "Stat",
+    "Stopped",
+    "Sub0",
+    "Surveyor0",
+    "TLSConfig",
+    "Timeout",
+    "TryAgain",
+    "WriteOnly",
+    "adevice",
+    "check_err",
+    "device",
+    "exceptions",
+    "ffi",
+    "lib",
+    "nng",
+    "nng_fini",
+    "nng_fini_at_exit",
+    "options",
+    "service",
+    "sockaddr",
+    "socket_stats",
+    "stats",
+    "tls",
+)
+
+
+class _PynngModule(_types.ModuleType):
+    # The atexit handler reads pynng.nng.nng_fini_at_exit. A plain copy here
+    # would make "pynng.nng_fini_at_exit = True" have no effect.
+    @property
+    def nng_fini_at_exit(self):
+        return _nng_module.nng_fini_at_exit
+
+    @nng_fini_at_exit.setter
+    def nng_fini_at_exit(self, value):
+        _nng_module.nng_fini_at_exit = value
+
+
+_sys.modules[__name__].__class__ = _PynngModule

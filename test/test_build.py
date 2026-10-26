@@ -12,6 +12,8 @@ directly.
 import glob
 import os
 import re
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -187,6 +189,22 @@ if not _NNG_INCLUDE_DIR:
 _skip_no_headers = pytest.mark.skipif(
     _NNG_INCLUDE_DIR is None,
     reason="NNG headers not available (set NNG_INCLUDE_DIR or build first)",
+)
+
+_NNG_V2_INCLUDE_DIR = os.environ.get("NNG_V2_INCLUDE_DIR")
+if not _NNG_V2_INCLUDE_DIR:
+    candidates = glob.glob(
+        os.path.join(
+            os.path.dirname(__file__), "..", "build", "*", "nng_v2_install", "include"
+        )
+    )
+    if candidates:
+        _NNG_V2_INCLUDE_DIR = candidates[0]
+
+_skip_no_v1_v2_headers = pytest.mark.skipif(
+    _NNG_INCLUDE_DIR is None or _NNG_V2_INCLUDE_DIR is None,
+    reason="NNG v1 and v2 headers not available (set NNG_INCLUDE_DIR and "
+    "NNG_V2_INCLUDE_DIR or build first)",
 )
 
 
@@ -609,3 +627,144 @@ class TestAioEngineHeader:
         for sym in required_symbols:
             assert hasattr(lib, sym), f"_nng.lib missing AIO symbol {sym}"
             assert callable(getattr(lib, sym)), f"_nng.lib.{sym} is not callable"
+
+
+def _cache_include_dir(cache_name):
+    return _NNG_V2_INCLUDE_DIR if "v2" in cache_name else _NNG_INCLUDE_DIR
+
+
+@_skip_no_v1_v2_headers
+class TestCdefCache:
+    """The committed cdef caches that builds without headerkit read."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_memo(self, monkeypatch):
+        import build_pynng
+
+        monkeypatch.setattr(build_pynng, "_CDEF_MEMO", {})
+
+    @staticmethod
+    def _without_headerkit(monkeypatch):
+        import build_pynng
+
+        def unavailable(*args, **kwargs):
+            raise AssertionError("headerkit must not be used")
+
+        monkeypatch.setattr(build_pynng, "_HEADERKIT_SUPPORTED", False)
+        monkeypatch.setattr(build_pynng, "get_backend", unavailable, raising=False)
+        monkeypatch.setattr(build_pynng, "header_to_cffi", unavailable, raising=False)
+        monkeypatch.setattr(build_pynng, "_CDEF_MEMO", {})
+
+    @pytest.mark.parametrize(
+        "cache_name", ["_nng_cdef_cache.txt", "_nng_v2_cdef_cache.txt"]
+    )
+    def test_cache_matches_headerkit_output(self, cache_name):
+        pytest.importorskip("headerkit")
+        import build_pynng
+
+        headers, pattern_lists = build_pynng.CDEF_CACHES[cache_name]
+        include_dir = _cache_include_dir(cache_name)
+        with open(os.path.join(_PROJECT_ROOT, cache_name), encoding="utf-8") as f:
+            stamp, variants = build_pynng.parse_cdef_cache(f.read())
+
+        assert stamp == build_pynng.nng_headers_stamp(include_dir)
+        expected = {
+            tuple(patterns): build_pynng.generate_cdef(headers, include_dir, patterns)[
+                0
+            ]
+            for patterns in pattern_lists
+        }
+        assert variants == expected
+
+    @pytest.mark.parametrize(
+        "cache_name", ["_nng_cdef_cache.txt", "_nng_v2_cdef_cache.txt"]
+    )
+    def test_generate_cdef_without_headerkit_reads_cache(self, monkeypatch, cache_name):
+        pytest.importorskip("headerkit")
+        import build_pynng
+
+        headers, pattern_lists = build_pynng.CDEF_CACHES[cache_name]
+        include_dir = _cache_include_dir(cache_name)
+        expected = [
+            build_pynng.generate_cdef(headers, include_dir, patterns)
+            for patterns in pattern_lists
+        ]
+
+        self._without_headerkit(monkeypatch)
+        actual = [
+            build_pynng.generate_cdef(headers, include_dir, patterns)
+            for patterns in pattern_lists
+        ]
+
+        assert actual == expected
+
+    @pytest.mark.parametrize(
+        "cache_name", ["_nng_cdef_cache.txt", "_nng_v2_cdef_cache.txt"]
+    )
+    def test_cache_refuses_different_headers(self, monkeypatch, tmp_path, cache_name):
+        import build_pynng
+
+        headers, pattern_lists = build_pynng.CDEF_CACHES[cache_name]
+        include_dir = tmp_path / "include"
+        shutil.copytree(
+            os.path.join(_cache_include_dir(cache_name), "nng"), include_dir / "nng"
+        )
+        with open(include_dir / "nng" / "nng.h", "a") as f:
+            f.write("int nng_added_after_the_cache(void);\n")
+
+        self._without_headerkit(monkeypatch)
+        with pytest.raises(RuntimeError, match="was generated from nng"):
+            build_pynng.generate_cdef(headers, str(include_dir), pattern_lists[0])
+
+    def test_cache_refuses_exclude_patterns_it_was_not_generated_with(
+        self, monkeypatch
+    ):
+        import build_pynng
+
+        # Matches a struct member line, not a declaration name.
+        patterns = build_pynng.EXCLUDE_PATTERNS_V2 + [r"sa_family"]
+
+        self._without_headerkit(monkeypatch)
+        with pytest.raises(RuntimeError, match="has no cdef for the exclude patterns"):
+            build_pynng.generate_cdef(
+                build_pynng.NNG_V2_HEADERS, _NNG_V2_INCLUDE_DIR, patterns
+            )
+
+    def test_missing_cache_file_is_an_error(self, monkeypatch, tmp_path):
+        import build_pynng
+
+        self._without_headerkit(monkeypatch)
+        monkeypatch.setattr(build_pynng, "_SCRIPT_DIR", str(tmp_path))
+        with pytest.raises(RuntimeError, match="_nng_cdef_cache.txt is missing"):
+            build_pynng.generate_cdef(
+                build_pynng.NNG_V1_HEADERS,
+                _NNG_INCLUDE_DIR,
+                build_pynng.EXCLUDE_PATTERNS,
+            )
+
+
+class TestHeaderkitImport:
+    def test_broken_headerkit_is_not_ignored(self, tmp_path):
+        """With Python 3.11+, an import error in headerkit fails the build."""
+        fake = tmp_path / "headerkit"
+        fake.mkdir()
+        (fake / "__init__.py").write_text("")
+        (fake / "backends.py").write_text("raise ImportError('broken headerkit')\n")
+        proc = subprocess.run(
+            [sys.executable, "-c", "import build_pynng"],
+            cwd=str(tmp_path),
+            env={
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join([str(tmp_path), _PROJECT_ROOT]),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        if sys.version_info >= (3, 11):
+            assert proc.returncode == 1
+            assert "ImportError: broken headerkit" in proc.stderr
+        else:
+            assert (proc.returncode, proc.stderr) == (0, "")
+
