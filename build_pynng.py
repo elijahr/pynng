@@ -367,9 +367,7 @@ def generate_cdef(
     return cdef, existing
 
 
-def generate_pyi(
-    headers=None, include_dir=None, exclude_patterns=None
-) -> str:
+def generate_pyi(headers=None, include_dir=None, exclude_patterns=None) -> str:
     """Parse nng headers and generate PEP 484 CFFI .pyi stub declarations."""
     if headers is None:
         headers = NNG_V1_HEADERS

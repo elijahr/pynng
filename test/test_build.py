@@ -11,7 +11,6 @@ directly.
 
 import glob
 import os
-import re
 import sys
 
 import pytest
@@ -168,6 +167,7 @@ class TestFFIDefines:
 # These require the NNG include directory to be available (either via env var
 # or auto-detected from the build cache).
 
+
 def _candidate_build_roots() -> list[str]:
     roots = [_PROJECT_ROOT]
     dot_git = os.path.join(_PROJECT_ROOT, ".git")
@@ -227,9 +227,7 @@ class TestHeaderkitWriters:
         assert define_lines["NNG_FLAG_ALLOC"] == "#define NNG_FLAG_ALLOC 1"
         assert define_lines["NNG_FLAG_NONBLOCK"] == "#define NNG_FLAG_NONBLOCK 2"
         # Negative control: no duplicate #define ... lines appended at bottom
-        alloc_lines = [
-            line for line in cdef.splitlines() if "NNG_FLAG_ALLOC" in line
-        ]
+        alloc_lines = [line for line in cdef.splitlines() if "NNG_FLAG_ALLOC" in line]
         assert alloc_lines == ["#define NNG_FLAG_ALLOC 1"]
 
     def test_cdef_emits_extern_python_callbacks_and_aio_engine(self):
@@ -239,8 +237,7 @@ class TestHeaderkitWriters:
         lines = {line.strip() for line in cdef.splitlines()}
         assert 'extern "Python" void _async_complete(void *);' in lines
         assert (
-            'extern "Python" void _nng_pipe_cb(nng_pipe, nng_pipe_ev, void *);'
-            in lines
+            'extern "Python" void _nng_pipe_cb(nng_pipe, nng_pipe_ev, void *);' in lines
         )
         assert "pynng_mpsc_queue_t *pynng_mpsc_queue_new(int write_fd);" in lines
         # Negative control: no invented `enum nng_pipe_ev` tag references
@@ -248,6 +245,7 @@ class TestHeaderkitWriters:
 
     def test_generate_pyi_emits_cffi_mode_stub(self):
         import ast
+
         from build_pynng import generate_pyi
 
         pyi_text = generate_pyi()
@@ -279,9 +277,7 @@ class TestHeaderkitWriters:
         v2_candidates: list[str] = []
         for root in _candidate_build_roots():
             v2_candidates.extend(
-                glob.glob(
-                    os.path.join(root, "build", "*", "nng_v2_install", "include")
-                )
+                glob.glob(os.path.join(root, "build", "*", "nng_v2_install", "include"))
             )
         if not v2_candidates:
             pytest.skip("nng v2 headers not found in build cache")
@@ -589,7 +585,9 @@ class TestPyPyHeaderkitCompat:
         assert "child = Cursor.from_buffer_copy(child); child._tu = self._tu" in lines
         assert "field = Cursor.from_buffer_copy(field); field._tu = self._tu" in lines
         assert "base = Cursor.from_buffer_copy(base); base._tu = self._tu" in lines
-        assert "method = Cursor.from_buffer_copy(method); method._tu = self._tu" in lines
+        assert (
+            "method = Cursor.from_buffer_copy(method); method._tu = self._tu" in lines
+        )
         assert "loc = SourceLocation.from_buffer_copy(lptr.contents)" in lines
         assert (
             "includes.append(FileInclusion(loc.file, File(c_object_p.from_buffer_copy(fobj)), loc, depth))"
