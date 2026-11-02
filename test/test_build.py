@@ -605,6 +605,36 @@ class TestPyPyHeaderkitCompat:
         assert not hasattr(build_pynng, "_transform_headerkit_clang_source")
         assert not hasattr(build_pynng, "_extract_defines")
 
+    def test_pyproject_requirements_are_valid_pep508(self):
+        """Verify all pyproject.toml requirement strings parse cleanly under PEP 508."""
+        import tomllib
+        from packaging.requirements import InvalidRequirement, Requirement
+
+        pyproject_path = os.path.join(_PROJECT_ROOT, "pyproject.toml")
+        with open(pyproject_path, "rb") as f:
+            data = tomllib.load(f)
+
+        all_reqs = (
+            list(data["project"]["dependencies"])
+            + list(data["project"]["optional-dependencies"]["dev"])
+            + list(data["project"]["optional-dependencies"]["docs"])
+            + list(data["build-system"]["requires"])
+        )
+        parsed = {req_str: Requirement(req_str).name for req_str in all_reqs}
+        assert (
+            parsed[
+                "headerkit @ git+https://github.com/axiomantic/headerkit.git@feat/headerkit-roundtable-v2 ; python_version >= '3.11'"
+            ]
+            == "headerkit"
+        )
+        assert "uv" not in data.get("tool", {}) or "sources" not in data["tool"]["uv"]
+
+        # Negative control: missing space before `;` after direct URL violates PEP 508
+        with pytest.raises(InvalidRequirement):
+            Requirement(
+                "headerkit @ git+https://github.com/axiomantic/headerkit.git@feat/headerkit-roundtable-v2; python_version >= '3.11'"
+            )
+
 
 class TestAioEngineHeader:
     """Verify that the standalone pure C AIO completion engine header is valid."""
