@@ -185,15 +185,17 @@ def _candidate_build_roots() -> list[str]:
     return roots
 
 
+_PY_TAG = f"cpython-{sys.version_info.major}{sys.version_info.minor}"
 _NNG_INCLUDE_DIR = os.environ.get("NNG_INCLUDE_DIR")
 if not _NNG_INCLUDE_DIR:
+    _all_v1_candidates: list[str] = []
     for _root in _candidate_build_roots():
-        candidates = glob.glob(
-            os.path.join(_root, "build", "*", "_deps", "nng-src", "include")
+        _all_v1_candidates.extend(
+            glob.glob(os.path.join(_root, "build", "*", "_deps", "nng-src", "include"))
         )
-        if candidates:
-            _NNG_INCLUDE_DIR = candidates[0]
-            break
+    if _all_v1_candidates:
+        _all_v1_candidates.sort(key=lambda p: (_PY_TAG not in p, p))
+        _NNG_INCLUDE_DIR = _all_v1_candidates[0]
 
 _skip_no_headers = pytest.mark.skipif(
     _NNG_INCLUDE_DIR is None,
@@ -239,7 +241,8 @@ class TestHeaderkitWriters:
         assert (
             'extern "Python" void _nng_pipe_cb(nng_pipe, nng_pipe_ev, void *);' in lines
         )
-        assert "pynng_mpsc_queue_t *pynng_mpsc_queue_new(int write_fd);" in lines
+        assert "typedef struct pynng_mpsc_queue pynng_mpsc_queue_t;" in lines
+        assert "pynng_mpsc_queue_t * pynng_mpsc_queue_new(int write_fd);" in lines
         # Negative control: no invented `enum nng_pipe_ev` tag references
         assert [line for line in lines if "enum nng_pipe_ev" in line] == []
 
@@ -349,6 +352,7 @@ class TestHeaderkitWriters:
             )
         if not v2_candidates:
             pytest.skip("nng v2 headers not found in build cache")
+        v2_candidates.sort(key=lambda p: (_PY_TAG not in p, p))
 
         cdef, _ = generate_cdef(
             headers=NNG_V2_HEADERS,
@@ -696,11 +700,13 @@ class TestPyPyHeaderkitCompat:
         )
 
     def test_build_pynng_has_no_runtime_clang_monkey_patch(self):
-        """Negative control: build_pynng no longer monkey-patches headerkit._clang."""
+        """Negative control: build_pynng no longer monkey-patches headerkit._clang or builds manual IR."""
         import build_pynng
 
         assert not hasattr(build_pynng, "_transform_headerkit_clang_source")
         assert not hasattr(build_pynng, "_extract_defines")
+        assert not hasattr(build_pynng, "_build_extra_pyi_declarations")
+        assert not hasattr(build_pynng, "_is_cffi_constant")
 
     def test_pyproject_requirements_are_valid_pep508(self):
         """Verify all pyproject.toml requirement strings parse cleanly under PEP 508."""

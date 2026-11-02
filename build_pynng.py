@@ -21,26 +21,14 @@ controlled by the NNG_MODULE_NAME environment variable:
 """
 
 import glob
-import inspect
 import logging
 import os
-import re
 import subprocess
 import sys
 from typing import Any
 
 try:
     from headerkit.backends import get_backend
-    from headerkit.ir import (
-        Constant,
-        CType,
-        Function,
-        Header,
-        Parameter,
-        Pointer,
-        Struct,
-        Typedef,
-    )
     from headerkit.writers.cffi import CffiWriter
     from headerkit.writers.pyi import PyiWriter
 
@@ -114,7 +102,7 @@ EXCLUDE_PATTERNS_V2 = [
     r"_uint64$",  # uint64 typed accessors not implemented in v2
 ]
 
-# Path for the cached cdef file (placed next to build_pynng.py).
+# Repository root and native C source directory paths.
 _SCRIPT_DIR = os.path.dirname(
     os.path.abspath(
         __file__ if "__file__" in dir() else os.path.join(os.getcwd(), "build_pynng.py")
@@ -327,141 +315,8 @@ _CDEF_MEMO: dict[
 ] = {}
 
 
-def _is_cffi_constant(decl: Any) -> bool:
-    """Return True if a Constant IR declaration is emitted onto CFFI's lib object."""
-    if not getattr(decl, "is_macro", False):
-        return False
-    val = getattr(decl, "value", None)
-    if isinstance(val, int) and not isinstance(val, bool):
-        return True
-    if val is None and any(re.search(pat, decl.name) for pat in DEFINE_PATTERNS):
-        return True
-    return False
-
-
-def _build_extra_pyi_declarations(*, include_extern_python: bool = True) -> list[Any]:
-    """Build IR declarations for aio_engine.h and extern 'Python' callbacks."""
-    _require_headerkit()
-    decls: list[Any] = [
-        Struct(name="pynng_aio_entry", fields=[]),
-        Typedef(
-            name="pynng_aio_entry_t",
-            underlying_type=CType("struct pynng_aio_entry", is_elaborated=True),
-        ),
-        Struct(name="pynng_mpsc_queue", fields=[]),
-        Typedef(
-            name="pynng_mpsc_queue_t",
-            underlying_type=CType("struct pynng_mpsc_queue", is_elaborated=True),
-        ),
-        Struct(name="pynng_sync_recv", fields=[]),
-        Typedef(
-            name="pynng_sync_recv_t",
-            underlying_type=CType("struct pynng_sync_recv", is_elaborated=True),
-        ),
-        Function(
-            name="pynng_mpsc_queue_new",
-            return_type=Pointer(CType("pynng_mpsc_queue_t")),
-            parameters=[Parameter("write_fd", CType("int"))],
-        ),
-        Function(
-            name="pynng_mpsc_queue_close",
-            return_type=CType("void"),
-            parameters=[Parameter("q", Pointer(CType("pynng_mpsc_queue_t")))],
-        ),
-        Function(
-            name="pynng_mpsc_queue_free",
-            return_type=CType("void"),
-            parameters=[Parameter("q", Pointer(CType("pynng_mpsc_queue_t")))],
-        ),
-        Function(
-            name="pynng_aio_entry_new",
-            return_type=Pointer(CType("pynng_aio_entry_t")),
-            parameters=[
-                Parameter("aio", Pointer(CType("void"))),
-                Parameter("slot_id", CType("uintptr_t")),
-                Parameter("q", Pointer(CType("pynng_mpsc_queue_t"))),
-            ],
-        ),
-        Function(
-            name="pynng_aio_entry_set_slot_id",
-            return_type=CType("void"),
-            parameters=[
-                Parameter("e", Pointer(CType("pynng_aio_entry_t"))),
-                Parameter("slot_id", CType("uintptr_t")),
-            ],
-        ),
-        Function(
-            name="pynng_aio_entry_is_idle",
-            return_type=CType("int"),
-            parameters=[Parameter("e", Pointer(CType("pynng_aio_entry_t")))],
-        ),
-        Function(
-            name="pynng_aio_entry_free",
-            return_type=CType("void"),
-            parameters=[Parameter("e", Pointer(CType("pynng_aio_entry_t")))],
-        ),
-        Function(
-            name="pynng_native_aio_complete",
-            return_type=CType("void"),
-            parameters=[Parameter("arg", Pointer(CType("void")))],
-        ),
-        Function(
-            name="pynng_mpsc_drain_batch",
-            return_type=CType("int"),
-            parameters=[
-                Parameter("q", Pointer(CType("pynng_mpsc_queue_t"))),
-                Parameter("out_slot_ids", Pointer(CType("uintptr_t"))),
-                Parameter("max_entries", CType("int")),
-            ],
-        ),
-        Function(
-            name="pynng_sync_recv_alloc",
-            return_type=CType("int"),
-            parameters=[Parameter("out", Pointer(Pointer(CType("pynng_sync_recv_t"))))],
-        ),
-        Function(
-            name="pynng_sync_recv_aio",
-            return_type=Pointer(CType("nng_aio")),
-            parameters=[Parameter("r", Pointer(CType("pynng_sync_recv_t")))],
-        ),
-        Function(
-            name="pynng_sync_recv_wait",
-            return_type=CType("int"),
-            parameters=[
-                Parameter("r", Pointer(CType("pynng_sync_recv_t"))),
-                Parameter("slice_ms", CType("int")),
-            ],
-        ),
-        Function(
-            name="pynng_sync_recv_free",
-            return_type=CType("void"),
-            parameters=[Parameter("r", Pointer(CType("pynng_sync_recv_t")))],
-        ),
-    ]
-    if include_extern_python:
-        decls.extend(
-            [
-                Function(
-                    name="_async_complete",
-                    return_type=CType("void"),
-                    parameters=[Parameter("arg0", Pointer(CType("void")))],
-                ),
-                Function(
-                    name="_nng_pipe_cb",
-                    return_type=CType("void"),
-                    parameters=[
-                        Parameter("arg0", CType("nng_pipe")),
-                        Parameter("arg1", CType("nng_pipe_ev")),
-                        Parameter("arg2", Pointer(CType("void"))),
-                    ],
-                ),
-            ]
-        )
-    return decls
-
-
 def _parse_nng_headers(headers=None, include_dir=None):
-    """Parse nng headers into a headerkit Header IR (memoized by header mtimes)."""
+    """Parse nng and aio_engine headers into a headerkit Header IR (memoized by mtimes)."""
     _require_headerkit()
     if headers is None:
         headers = NNG_V1_HEADERS
@@ -469,8 +324,12 @@ def _parse_nng_headers(headers=None, include_dir=None):
         include_dir = _get_nng_include_dir()
 
     existing = [h for h in headers if os.path.exists(os.path.join(include_dir, h))]
+    aio_mtime = (
+        os.path.getmtime(_AIO_ENGINE_H) if os.path.exists(_AIO_ENGINE_H) else 0.0
+    )
     parse_key = (
-        tuple((h, os.path.getmtime(os.path.join(include_dir, h))) for h in existing),
+        tuple((h, os.path.getmtime(os.path.join(include_dir, h))) for h in existing)
+        + (("_aio_engine_h", aio_mtime),),
         include_dir,
     )
     if parse_key in _PARSE_MEMO:
@@ -483,6 +342,7 @@ def _parse_nng_headers(headers=None, include_dir=None):
 #define NNG_STATIC_LIB
 #define NNG_DEPRECATED
 {includes}
+{_AIO_ENGINE_CDEF}
 """
     backend = get_backend("libclang")
     header = backend.parse(
@@ -523,8 +383,12 @@ def generate_cdef(
 
     existing = [h for h in headers if os.path.exists(os.path.join(include_dir, h))]
     header_paths = [os.path.join(include_dir, h) for h in existing]
+    aio_mtime = (
+        os.path.getmtime(_AIO_ENGINE_H) if os.path.exists(_AIO_ENGINE_H) else 0.0
+    )
     memo_key = (
-        tuple((h, os.path.getmtime(p)) for h, p in zip(existing, header_paths)),
+        tuple((h, os.path.getmtime(p)) for h, p in zip(existing, header_paths))
+        + (("_aio_engine_h", aio_mtime),),
         include_dir,
         tuple(exclude_patterns),
     )
@@ -538,7 +402,6 @@ def generate_cdef(
         exclude_patterns=list(exclude_patterns),
         define_patterns=DEFINE_PATTERNS,
         extern_python=EXTERN_PYTHON_CALLBACKS,
-        extra_cdef=[_AIO_ENGINE_CDEF.strip()],
     )
     cdef = writer.write(header)
 
@@ -555,27 +418,13 @@ def generate_pyi(headers=None, include_dir=None, exclude_patterns=None) -> str:
         exclude_patterns = EXCLUDE_PATTERNS
 
     header, _, _ = _parse_nng_headers(headers=headers, include_dir=include_dir)
-    pyi_init_params = inspect.signature(PyiWriter.__init__).parameters
-    has_extern_python_opt = "extern_python" in pyi_init_params
-
-    filtered_decls = [
-        decl
-        for decl in header.declarations
-        if not isinstance(decl, Constant) or _is_cffi_constant(decl)
-    ] + _build_extra_pyi_declarations(include_extern_python=not has_extern_python_opt)
-    pyi_header = Header(path=header.path, declarations=filtered_decls)
-
-    writer_kwargs: dict[str, Any] = {
-        "mode": "cffi",
-        "exclude_patterns": list(exclude_patterns),
-    }
-    if "define_patterns" in pyi_init_params:
-        writer_kwargs["define_patterns"] = DEFINE_PATTERNS
-    if has_extern_python_opt:
-        writer_kwargs["extern_python"] = EXTERN_PYTHON_CALLBACKS
-
-    writer = PyiWriter(**writer_kwargs)
-    return writer.write(pyi_header)
+    writer = PyiWriter(
+        mode="cffi",
+        exclude_patterns=list(exclude_patterns),
+        define_patterns=DEFINE_PATTERNS,
+        extern_python=EXTERN_PYTHON_CALLBACKS,
+    )
+    return writer.write(header)
 
 
 def _build_ffi(module_name="pynng._nng", headers=None, exclude_patterns=None):
