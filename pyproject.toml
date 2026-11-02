@@ -35,6 +35,8 @@ keywords = [
     "asyncio",
 ]
 readme = "README.md"
+# Pre-built cp310 abi3 wheels support Python >= 3.10; building from source requires
+# headerkit (Python >= 3.11), gated via PEP 508 environment markers below.
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
@@ -52,6 +54,7 @@ requires = [
     "scikit-build-core>=0.8.0",
     "cffi",
     "cffi_buildtool",
+    # headerkit requires Python >= 3.11; Python 3.10 consumers install the cp310 abi3 wheel
     "headerkit @ git+https://github.com/axiomantic/headerkit.git@feat/headerkit-roundtable-v2 ; python_version >= '3.11'",
     "setuptools-scm",
 ]

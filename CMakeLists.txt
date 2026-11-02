@@ -348,6 +348,7 @@ endif()
 # Create a custom command to generate the CFFI bindings
 add_custom_command(
   OUTPUT ${CFFI_OUTPUT_FILE}
+  BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/pynng/_nng.pyi
   COMMAND ${CMAKE_COMMAND} -E echo "Generating CFFI bindings for NNG v1..."
   COMMAND ${CMAKE_COMMAND} -E env
     "NNG_INCLUDE_DIR=${nng_SOURCE_DIR}/include"
@@ -632,6 +633,7 @@ set(WOLFSSL_FOUND TRUE)
   # The v2 CFFI generation depends on the v2 build completing (so headers are installed).
   add_custom_command(
     OUTPUT ${CFFI_V2_OUTPUT_FILE}
+    BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/pynng/_nng_v2.pyi
     COMMAND ${CMAKE_COMMAND} -E echo "Generating CFFI bindings for NNG v2..."
     COMMAND ${CMAKE_COMMAND} -E env
       "NNG_INCLUDE_DIR=${NNG_V2_INSTALL_DIR}/include"
@@ -720,6 +722,8 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/pynng/
   DESTINATION ${SKBUILD_PROJECT_NAME}
   FILES_MATCHING
   PATTERN "*.py"
+  PATTERN "*.pyi"
+  PATTERN "py.typed"
   PATTERN "__pycache__" EXCLUDE)
 
 # Install the compiled `_nng` Python extension module

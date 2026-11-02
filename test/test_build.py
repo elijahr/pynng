@@ -267,12 +267,80 @@ class TestHeaderkitWriters:
             for node in lib_classes[0].body
             if isinstance(node, ast.FunctionDef)
         }
+        lib_attrs = {
+            node.target.id
+            for node in lib_classes[0].body
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
         assert "nng_send" in lib_methods
         assert "nng_recv" in lib_methods
         assert "nng_tls_config_pass" not in lib_methods
 
+        # All 13 aio_engine.h C functions and both extern "Python" callbacks must be on _Lib
+        expected_aio_and_cb = {
+            "_async_complete",
+            "_nng_pipe_cb",
+            "pynng_aio_entry_free",
+            "pynng_aio_entry_is_idle",
+            "pynng_aio_entry_new",
+            "pynng_aio_entry_set_slot_id",
+            "pynng_mpsc_drain_batch",
+            "pynng_mpsc_queue_close",
+            "pynng_mpsc_queue_free",
+            "pynng_mpsc_queue_new",
+            "pynng_native_aio_complete",
+            "pynng_sync_recv_aio",
+            "pynng_sync_recv_alloc",
+            "pynng_sync_recv_free",
+            "pynng_sync_recv_wait",
+        }
+        assert expected_aio_and_cb & lib_methods == expected_aio_and_cb
+
+        # Negative controls: string macros and un-exported expression macros must not appear on _Lib
+        assert "NNG_OPT_SOCKNAME" not in lib_attrs
+        assert "NNG_RELEASE_SUFFIX" not in lib_attrs
+        assert "NNG_MAXADDRSTRLEN" not in lib_attrs
+
+        # If _nng is compiled, verify exact 1:1 member parity between _Lib and runtime dir(lib)
+        if _has_compiled_nng:
+            assert (lib_methods | lib_attrs) == set(dir(lib))
+
+    def test_parse_nng_headers_memoization_avoids_duplicate_libclang_parses(
+        self, monkeypatch
+    ):
+        import build_pynng
+
+        build_pynng._PARSE_MEMO.clear()
+        build_pynng._CDEF_MEMO.clear()
+        parse_calls: list[str] = []
+        real_get_backend = build_pynng.get_backend
+
+        def tracking_get_backend(name: str):
+            backend = real_get_backend(name)
+
+            class _Proxy:
+                def parse(self, *args, **kwargs):
+                    parse_calls.append(name)
+                    return backend.parse(*args, **kwargs)
+
+            return _Proxy()
+
+        monkeypatch.setattr(build_pynng, "get_backend", tracking_get_backend)
+        cdef_out, _ = build_pynng.generate_cdef()
+        pyi_out = build_pynng.generate_pyi()
+        assert len(cdef_out) > 0
+        assert len(pyi_out) > 0
+        assert parse_calls == ["libclang"]
+
     def test_v2_cdef_emits_tagless_init_params_and_single_star_fn_ptrs(self):
-        from build_pynng import EXCLUDE_PATTERNS_V2, NNG_V2_HEADERS, generate_cdef
+        import ast
+
+        from build_pynng import (
+            EXCLUDE_PATTERNS_V2,
+            NNG_V2_HEADERS,
+            generate_cdef,
+            generate_pyi,
+        )
 
         v2_candidates: list[str] = []
         for root in _candidate_build_roots():
@@ -295,6 +363,35 @@ class TestHeaderkitWriters:
         # Negative controls: no double-star function pointer fields or struct nng_init_params
         assert "void * (**malloc_fn)(size_t);" not in lines
         assert "typedef struct nng_init_params {" not in lines
+
+        # Verify v2 .pyi stub matches runtime pynng._nng_v2.lib 1:1
+        pyi_v2 = generate_pyi(
+            headers=NNG_V2_HEADERS,
+            include_dir=v2_candidates[0],
+            exclude_patterns=EXCLUDE_PATTERNS_V2,
+        )
+        tree_v2 = ast.parse(pyi_v2)
+        lib_cls_v2 = [
+            node
+            for node in tree_v2.body
+            if isinstance(node, ast.ClassDef) and node.name == "_Lib"
+        ][0]
+        v2_pyi_members = {
+            node.name for node in lib_cls_v2.body if isinstance(node, ast.FunctionDef)
+        } | {
+            node.target.id
+            for node in lib_cls_v2.body
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        assert "NNG_OPT_SOCKNAME" not in v2_pyi_members
+        assert "pynng_mpsc_queue_new" in v2_pyi_members
+        assert "_async_complete" in v2_pyi_members
+        try:
+            import pynng._nng_v2 as nng_v2
+
+            assert v2_pyi_members == set(dir(nng_v2.lib))
+        except ImportError:
+            pass
 
 
 @_skip_no_headers
@@ -634,6 +731,28 @@ class TestPyPyHeaderkitCompat:
             Requirement(
                 "headerkit @ git+https://github.com/axiomantic/headerkit.git@feat/headerkit-roundtable-v2; python_version >= '3.11'"
             )
+
+    def test_require_headerkit_raises_runtime_error_when_unavailable(self, monkeypatch):
+        """Negative control: calling build functions without headerkit raises a clear RuntimeError."""
+        import build_pynng
+
+        monkeypatch.setattr(build_pynng, "_HAS_HEADERKIT", False)
+        with pytest.raises(RuntimeError, match="headerkit \\(requires Python >= 3\\.11\\)"):
+            build_pynng._require_headerkit()
+
+    def test_py_typed_marker_and_cmake_pyi_install_rules_exist(self):
+        """Verify PEP 561 py.typed marker exists and CMakeLists.txt installs .pyi and py.typed."""
+        py_typed_path = os.path.join(_PROJECT_ROOT, "pynng", "py.typed")
+        assert os.path.isfile(py_typed_path)
+
+        cmake_path = os.path.join(_PROJECT_ROOT, "CMakeLists.txt")
+        with open(cmake_path, encoding="utf-8") as f:
+            cmake_lines = {line.strip() for line in f.read().splitlines()}
+
+        assert "BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/pynng/_nng.pyi" in cmake_lines
+        assert "BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/pynng/_nng_v2.pyi" in cmake_lines
+        assert 'PATTERN "*.pyi"' in cmake_lines
+        assert 'PATTERN "py.typed"' in cmake_lines
 
 
 class TestAioEngineHeader:
