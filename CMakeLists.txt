@@ -374,14 +374,10 @@ endif()
 # C11 standard is required for stdatomic.h in pynng's MPSC queue.
 set_target_properties(_nng PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 
-# Suppress incompatible-pointer-types errors in CFFI-generated code.
-# The NNG API uses const-qualified pointer-to-pointer params (e.g. const nng_url **)
-# but the generated CFFI cdef doesn't carry the const qualifier yet.
-# TODO: Fix const handling in headerkit cdef writer and remove this workaround.
 if(MSVC)
   target_compile_options(_nng PRIVATE /std:c11 /experimental:c11atomics)
 else()
-  target_compile_options(_nng PRIVATE -Wno-incompatible-pointer-types -fvisibility=hidden)
+  target_compile_options(_nng PRIVATE -fvisibility=hidden)
 endif()
 
 # Include directories for Python and NNG headers
@@ -665,7 +661,7 @@ set(WOLFSSL_FOUND TRUE)
   if(MSVC)
     target_compile_options(_nng_v2 PRIVATE /std:c11 /experimental:c11atomics)
   else()
-    target_compile_options(_nng_v2 PRIVATE -Wno-incompatible-pointer-types -fvisibility=hidden)
+    target_compile_options(_nng_v2 PRIVATE -fvisibility=hidden)
   endif()
 
   # Include directories

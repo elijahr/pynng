@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Migrate `build_pynng.py` to `headerkit@feat/headerkit-roundtable-v2` (`CffiWriter` and `PyiWriter(mode="cffi")`), removing the runtime `headerkit._clang` monkey-patch loader, regex `cdef` post-processing, `_extract_defines()`, dummy enum tag workarounds, and `-Wno-incompatible-pointer-types` compiler flags in `CMakeLists.txt`
+
 ## [1.0.0b2] - 2026-10-31
 
 ### Added

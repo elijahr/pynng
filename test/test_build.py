@@ -168,21 +168,32 @@ class TestFFIDefines:
 # These require the NNG include directory to be available (either via env var
 # or auto-detected from the build cache).
 
+def _candidate_build_roots() -> list[str]:
+    roots = [_PROJECT_ROOT]
+    dot_git = os.path.join(_PROJECT_ROOT, ".git")
+    if os.path.isfile(dot_git):
+        with open(dot_git, encoding="utf-8") as f:
+            line = f.read().strip()
+        if line.startswith("gitdir:"):
+            gitdir = line.split(":", 1)[1].strip()
+            if not os.path.isabs(gitdir):
+                gitdir = os.path.normpath(os.path.join(_PROJECT_ROOT, gitdir))
+            # .git/worktrees/<name> -> main repo root is 3 levels up
+            main_root = os.path.normpath(os.path.join(gitdir, "..", "..", ".."))
+            if os.path.isdir(main_root) and main_root not in roots:
+                roots.append(main_root)
+    return roots
+
+
 _NNG_INCLUDE_DIR = os.environ.get("NNG_INCLUDE_DIR")
 if not _NNG_INCLUDE_DIR:
-    candidates = glob.glob(
-        os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "build",
-            "*",
-            "_deps",
-            "nng-src",
-            "include",
+    for _root in _candidate_build_roots():
+        candidates = glob.glob(
+            os.path.join(_root, "build", "*", "_deps", "nng-src", "include")
         )
-    )
-    if candidates:
-        _NNG_INCLUDE_DIR = candidates[0]
+        if candidates:
+            _NNG_INCLUDE_DIR = candidates[0]
+            break
 
 _skip_no_headers = pytest.mark.skipif(
     _NNG_INCLUDE_DIR is None,
@@ -191,8 +202,8 @@ _skip_no_headers = pytest.mark.skipif(
 
 
 @_skip_no_headers
-class TestExtractDefines:
-    """Test _extract_defines() from build_pynng against real NNG headers."""
+class TestHeaderkitWriters:
+    """Test CffiWriter and PyiWriter integration in build_pynng against real nng headers."""
 
     @pytest.fixture(autouse=True)
     def _set_include_dir(self):
@@ -204,39 +215,90 @@ class TestExtractDefines:
         else:
             os.environ["NNG_INCLUDE_DIR"] = old
 
-    def _get_extract_defines(self):
-        from build_pynng import _extract_defines
+    def test_cdef_defines_are_deduplicated_and_exact(self):
+        from build_pynng import generate_cdef
 
-        return _extract_defines
+        cdef, _ = generate_cdef()
+        define_lines = {
+            line.split()[1]: line
+            for line in cdef.splitlines()
+            if line.startswith("#define ")
+        }
+        assert define_lines["NNG_FLAG_ALLOC"] == "#define NNG_FLAG_ALLOC 1"
+        assert define_lines["NNG_FLAG_NONBLOCK"] == "#define NNG_FLAG_NONBLOCK 2"
+        # Negative control: no duplicate #define ... lines appended at bottom
+        alloc_lines = [
+            line for line in cdef.splitlines() if "NNG_FLAG_ALLOC" in line
+        ]
+        assert alloc_lines == ["#define NNG_FLAG_ALLOC 1"]
 
-    def test_extract_defines_contains_expected_names(self):
-        _extract_defines = self._get_extract_defines()
-        nng_h = os.path.join(_NNG_INCLUDE_DIR, "nng", "nng.h")
-        result = _extract_defines(nng_h)
-        assert "NNG_FLAG_ALLOC" in result
-        assert "NNG_FLAG_NONBLOCK" in result
-        assert "NNG_MAXADDRLEN" in result
+    def test_cdef_emits_extern_python_callbacks_and_aio_engine(self):
+        from build_pynng import generate_cdef
 
-    def test_extract_defines_format(self):
-        _extract_defines = self._get_extract_defines()
-        nng_h = os.path.join(_NNG_INCLUDE_DIR, "nng", "nng.h")
-        result = _extract_defines(nng_h)
-        assert result.strip(), "Expected non-empty defines output"
-        for line in result.strip().split("\n"):
-            assert line.startswith("#define "), f"Bad line: {line!r}"
-            assert line.endswith(" ..."), f"Bad line: {line!r}"
-            # Verify the name is a valid C identifier
-            parts = line.split()
-            name = parts[1]
-            assert re.match(r"^[A-Z_][A-Z0-9_]+$", name), (
-                f"Invalid define name: {name!r}"
+        cdef, _ = generate_cdef()
+        lines = {line.strip() for line in cdef.splitlines()}
+        assert 'extern "Python" void _async_complete(void *);' in lines
+        assert (
+            'extern "Python" void _nng_pipe_cb(nng_pipe, nng_pipe_ev, void *);'
+            in lines
+        )
+        assert "pynng_mpsc_queue_t *pynng_mpsc_queue_new(int write_fd);" in lines
+        # Negative control: no invented `enum nng_pipe_ev` tag references
+        assert [line for line in lines if "enum nng_pipe_ev" in line] == []
+
+    def test_generate_pyi_emits_cffi_mode_stub(self):
+        import ast
+        from build_pynng import generate_pyi
+
+        pyi_text = generate_pyi()
+        tree = ast.parse(pyi_text)
+        top_level_ann = {
+            node.target.id: ast.unparse(node.annotation)
+            for node in tree.body
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        assert top_level_ann == {"ffi": "cffi.FFI", "lib": "_Lib"}
+        lib_classes = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "_Lib"
+        ]
+        assert len(lib_classes) == 1
+        lib_methods = {
+            node.name
+            for node in lib_classes[0].body
+            if isinstance(node, ast.FunctionDef)
+        }
+        assert "nng_send" in lib_methods
+        assert "nng_recv" in lib_methods
+        assert "nng_tls_config_pass" not in lib_methods
+
+    def test_v2_cdef_emits_tagless_init_params_and_single_star_fn_ptrs(self):
+        from build_pynng import EXCLUDE_PATTERNS_V2, NNG_V2_HEADERS, generate_cdef
+
+        v2_candidates: list[str] = []
+        for root in _candidate_build_roots():
+            v2_candidates.extend(
+                glob.glob(
+                    os.path.join(root, "build", "*", "nng_v2_install", "include")
+                )
             )
+        if not v2_candidates:
+            pytest.skip("nng v2 headers not found in build cache")
 
-    def test_extract_defines_returns_string(self):
-        _extract_defines = self._get_extract_defines()
-        nng_h = os.path.join(_NNG_INCLUDE_DIR, "nng", "nng.h")
-        result = _extract_defines(nng_h)
-        assert isinstance(result, str)
+        cdef, _ = generate_cdef(
+            headers=NNG_V2_HEADERS,
+            include_dir=v2_candidates[0],
+            exclude_patterns=EXCLUDE_PATTERNS_V2,
+        )
+        lines = {line.strip() for line in cdef.splitlines()}
+        assert "void * (*malloc_fn)(size_t);" in lines
+        assert "void * (*calloc_fn)(size_t, size_t);" in lines
+        assert "void (*free_fn)(void *, size_t);" in lines
+        assert "nng_err nng_init(const nng_init_params * params);" in lines
+        # Negative controls: no double-star function pointer fields or struct nng_init_params
+        assert "void * (**malloc_fn)(size_t);" not in lines
+        assert "typedef struct nng_init_params {" not in lines
 
 
 @_skip_no_headers
@@ -502,15 +564,14 @@ class TestV2Differences:
 
 
 class TestPyPyHeaderkitCompat:
-    """Verify PyPy ctypes compatibility transforms for headerkit._clang."""
+    """Verify upstreamed PyPy and ARM64 ctypes compatibility in headerkit._clang."""
 
     @pytest.fixture(autouse=True)
     def _require_headerkit(self):
         pytest.importorskip("headerkit")
 
-    def test_transform_cindex_py_compiles_and_copies_callback_cursors(self):
+    def test_upstream_cindex_py_copies_callback_cursors_and_compiles(self):
         import headerkit._clang
-        from build_pynng import _transform_headerkit_clang_source
 
         clang_dir = os.path.dirname(os.path.abspath(headerkit._clang.__file__))
         cindex_files = sorted(glob.glob(os.path.join(clang_dir, "v*", "cindex.py")))
@@ -519,42 +580,32 @@ class TestPyPyHeaderkitCompat:
         with open(cindex_path, encoding="utf-8") as f:
             raw_source = f.read()
 
-        transformed = _transform_headerkit_clang_source(cindex_path, raw_source)
-        compile(transformed, cindex_path, "exec")
+        compile(raw_source, cindex_path, "exec")
+        lines = {line.strip() for line in raw_source.splitlines()}
         assert (
-            "from headerkit._clang import _compat_c_interop_string as c_interop_string"
-            in transformed
+            "from headerkit._clang import _NEEDS_INTEROP_STRING_PATCH, _compat_c_interop_string"
+            in lines
+        )
+        assert "child = Cursor.from_buffer_copy(child); child._tu = self._tu" in lines
+        assert "field = Cursor.from_buffer_copy(field); field._tu = self._tu" in lines
+        assert "base = Cursor.from_buffer_copy(base); base._tu = self._tu" in lines
+        assert "method = Cursor.from_buffer_copy(method); method._tu = self._tu" in lines
+        assert "loc = SourceLocation.from_buffer_copy(lptr.contents)" in lines
+        assert (
+            "includes.append(FileInclusion(loc.file, File(c_object_p.from_buffer_copy(fobj)), loc, depth))"
+            in lines
         )
         assert (
-            "child = Cursor.from_buffer_copy(child); child._tu = self._tu"
-            in transformed
-        )
-        assert (
-            "field = Cursor.from_buffer_copy(field); field._tu = self._tu"
-            in transformed
-        )
-        assert (
-            "base = Cursor.from_buffer_copy(base); base._tu = self._tu" in transformed
-        )
-        assert (
-            "method = Cursor.from_buffer_copy(method); method._tu = self._tu"
-            in transformed
-        )
-        assert "loc = SourceLocation.from_buffer_copy(lptr.contents)" in transformed
-        assert "File(c_object_p.from_buffer_copy(fobj))" in transformed
-        assert (
-            "Cursor.from_buffer_copy(self), Cursor.from_buffer_copy(other)"
-            in transformed
+            "conf.lib.clang_equalCursors(Cursor.from_buffer_copy(self), Cursor.from_buffer_copy(other))"
+            in lines
         )
 
-    def test_transform_unrelated_file_is_unchanged(self):
-        """Negative control: files other than __init__.py and cindex.py are untouched."""
-        from build_pynng import _transform_headerkit_clang_source
+    def test_build_pynng_has_no_runtime_clang_monkey_patch(self):
+        """Negative control: build_pynng no longer monkey-patches headerkit._clang."""
+        import build_pynng
 
-        sample = "class c_interop_string(c_char_p):\n    return x.value\n"
-        assert (
-            _transform_headerkit_clang_source("/tmp/other_module.py", sample) == sample
-        )
+        assert not hasattr(build_pynng, "_transform_headerkit_clang_source")
+        assert not hasattr(build_pynng, "_extract_defines")
 
 
 class TestAioEngineHeader:
