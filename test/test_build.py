@@ -724,18 +724,13 @@ class TestPyPyHeaderkitCompat:
             + list(data["build-system"]["requires"])
         )
         parsed = {req_str: Requirement(req_str).name for req_str in all_reqs}
-        assert (
-            parsed[
-                "headerkit @ git+https://github.com/axiomantic/headerkit.git@feat/headerkit-roundtable-v2 ; python_version >= '3.11'"
-            ]
-            == "headerkit"
-        )
+        assert parsed["headerkit~=0.50.0 ; python_version >= '3.11'"] == "headerkit"
         assert "uv" not in data.get("tool", {}) or "sources" not in data["tool"]["uv"]
 
         # Negative control: missing space before `;` after direct URL violates PEP 508
         with pytest.raises(InvalidRequirement):
             Requirement(
-                "headerkit @ git+https://github.com/axiomantic/headerkit.git@feat/headerkit-roundtable-v2; python_version >= '3.11'"
+                "headerkit @ git+https://github.com/axiomantic/headerkit.git@v0.50.0; python_version >= '3.11'"
             )
 
     def test_require_headerkit_raises_runtime_error_when_unavailable(self, monkeypatch):

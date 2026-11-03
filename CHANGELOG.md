@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add PEP 561 `pynng/py.typed` marker and install generated `_nng.pyi` / `_nng_v2.pyi` type stubs into built wheels via `CMakeLists.txt`
 
 ### Changed
-- Migrate `build_pynng.py` to `headerkit@feat/headerkit-roundtable-v2` (`CffiWriter` and `PyiWriter(mode="cffi")`), removing the runtime `headerkit._clang` monkey-patch loader, regex `cdef` post-processing, `_extract_defines()`, dummy enum tag workarounds, and `-Wno-incompatible-pointer-types` compiler flags in `CMakeLists.txt`
+- Migrate `build_pynng.py` to `headerkit~=0.50.0` (`CffiWriter` and `PyiWriter(mode="cffi")`), removing the runtime `headerkit._clang` monkey-patch loader, regex `cdef` post-processing, `_extract_defines()`, dummy enum tag workarounds, and `-Wno-incompatible-pointer-types` compiler flags in `CMakeLists.txt`
 - Parse `aio_engine.h` C declarations directly in `_parse_nng_headers()` and memoize the parsed `Header` IR so `CffiWriter` and `PyiWriter(mode="cffi")` share a single `libclang` parse pass per target and emit 1:1 matching `_nng.pyi` / `_nng_v2.pyi` stubs natively
 
 ## [1.0.0b2] - 2026-10-31
