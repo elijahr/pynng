@@ -54,7 +54,6 @@ Code Organization
       sockaddr.py       Socket address types (SockAddr, InprocAddr, IPCAddr, etc.)
       exceptions.py     Exception hierarchy mapping NNG error codes
       v2/               nng v2 bindings (import pynng.v2 as pynng)
-      py.typed          PEP 561 inline type annotation marker
       _nng.*            Compiled CFFI extension and .pyi stub for nng v1 (generated at build time)
       _nng_v2.*         Compiled CFFI extension and .pyi stub for nng v2 (generated at build time)
       _version.py       Auto-generated version (setuptools-scm, not in source tree)

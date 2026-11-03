@@ -349,14 +349,14 @@ endif()
 add_custom_command(
   OUTPUT ${CFFI_OUTPUT_FILE}
   BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/pynng/_nng.pyi
-  COMMAND ${CMAKE_COMMAND} -E echo "Generating CFFI bindings for NNG v1..."
+  COMMAND ${CMAKE_COMMAND} -E echo "Generating CFFI bindings for nng v1..."
   COMMAND ${CMAKE_COMMAND} -E env
     "NNG_INCLUDE_DIR=${nng_SOURCE_DIR}/include"
     "PYNNG_TLS_ENABLED=${_V1_TLS_ENABLED_INT}"
     ${Python_EXECUTABLE} -m cffi_buildtool exec-python ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py ${CFFI_OUTPUT_FILE} --ffi-var=ffibuilder
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py ${CMAKE_CURRENT_SOURCE_DIR}/src/aio_engine.h
-  COMMENT "Generating CFFI bindings for NNG"
+  COMMENT "Generating CFFI bindings for nng"
   VERBATIM
 )
 
@@ -634,7 +634,7 @@ set(WOLFSSL_FOUND TRUE)
   add_custom_command(
     OUTPUT ${CFFI_V2_OUTPUT_FILE}
     BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/pynng/_nng_v2.pyi
-    COMMAND ${CMAKE_COMMAND} -E echo "Generating CFFI bindings for NNG v2..."
+    COMMAND ${CMAKE_COMMAND} -E echo "Generating CFFI bindings for nng v2..."
     COMMAND ${CMAKE_COMMAND} -E env
       "NNG_INCLUDE_DIR=${NNG_V2_INSTALL_DIR}/include"
       "NNG_MODULE_NAME=pynng._nng_v2"
@@ -642,7 +642,7 @@ set(WOLFSSL_FOUND TRUE)
       ${Python_EXECUTABLE} -m cffi_buildtool exec-python ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py ${CFFI_V2_OUTPUT_FILE} --ffi-var=ffibuilder
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build_pynng.py ${CMAKE_CURRENT_SOURCE_DIR}/src/aio_engine.h nng_v2_build
-    COMMENT "Generating CFFI bindings for NNG v2"
+    COMMENT "Generating CFFI bindings for nng v2"
     VERBATIM
   )
 
@@ -723,7 +723,6 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/pynng/
   FILES_MATCHING
   PATTERN "*.py"
   PATTERN "*.pyi"
-  PATTERN "py.typed"
   PATTERN "__pycache__" EXCLUDE)
 
 # Install the compiled `_nng` Python extension module

@@ -49,6 +49,7 @@ def _require_headerkit() -> None:
             "install a pre-built pynng wheel instead of building from source."
         )
 
+
 logger = logging.getLogger(__name__)
 
 # v1 headers: individual protocol headers plus TLS
@@ -111,29 +112,6 @@ _SCRIPT_DIR = os.path.dirname(
 _SRC_DIR = os.path.join(_SCRIPT_DIR, "src")
 _AIO_ENGINE_H = os.path.join(_SRC_DIR, "aio_engine.h")
 
-# CFFI cdef declarations for the pure C AIO completion engine (aio_engine.h).
-_AIO_ENGINE_CDEF = """
-        typedef struct pynng_aio_entry pynng_aio_entry_t;
-        typedef struct pynng_mpsc_queue pynng_mpsc_queue_t;
-
-        pynng_mpsc_queue_t *pynng_mpsc_queue_new(int write_fd);
-        void pynng_mpsc_queue_close(pynng_mpsc_queue_t *q);
-        void pynng_mpsc_queue_free(pynng_mpsc_queue_t *q);
-        pynng_aio_entry_t *pynng_aio_entry_new(void *aio, uintptr_t slot_id, pynng_mpsc_queue_t *q);
-        void pynng_aio_entry_set_slot_id(pynng_aio_entry_t *e, uintptr_t slot_id);
-        int pynng_aio_entry_is_idle(pynng_aio_entry_t *e);
-        void pynng_aio_entry_free(pynng_aio_entry_t *e);
-        void pynng_native_aio_complete(void *arg);
-        int pynng_mpsc_drain_batch(pynng_mpsc_queue_t *q, uintptr_t *out_slot_ids, int max_entries);
-
-        typedef struct pynng_sync_recv pynng_sync_recv_t;
-
-        int pynng_sync_recv_alloc(pynng_sync_recv_t **out);
-        nng_aio *pynng_sync_recv_aio(pynng_sync_recv_t *r);
-        int pynng_sync_recv_wait(pynng_sync_recv_t *r, int slice_ms);
-        void pynng_sync_recv_free(pynng_sync_recv_t *r);
-"""
-
 
 def _validate_nng_include_dir(path: str) -> str | None:
     """Return path if it contains nng/nng.h, else None."""
@@ -148,7 +126,7 @@ def _detect_env_var() -> str | None:
     if val:
         result = _validate_nng_include_dir(val)
         if result:
-            logger.debug("NNG headers found via NNG_INCLUDE_DIR env var: %s", result)
+            logger.debug("nng headers found via NNG_INCLUDE_DIR env var: %s", result)
         else:
             logger.debug("NNG_INCLUDE_DIR set to %s but nng/nng.h not found there", val)
         return result
@@ -164,7 +142,7 @@ def _detect_build_tree() -> str | None:
     for candidate in candidates:
         result = _validate_nng_include_dir(candidate)
         if result:
-            logger.debug("NNG headers found in build tree: %s", result)
+            logger.debug("nng headers found in build tree: %s", result)
             return result
     return None
 
@@ -177,6 +155,7 @@ def _detect_pkg_config() -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if output.returncode == 0:
             for flag in output.stdout.strip().split():
@@ -184,7 +163,7 @@ def _detect_pkg_config() -> str | None:
                     path = flag[2:]
                     result = _validate_nng_include_dir(path)
                     if result:
-                        logger.debug("NNG headers found via pkg-config: %s", result)
+                        logger.debug("nng headers found via pkg-config: %s", result)
                         return result
     except (FileNotFoundError, subprocess.TimeoutExpired):
         logger.debug("pkg-config not available or timed out")
@@ -197,7 +176,7 @@ def _detect_system_paths() -> str | None:
     for path in paths:
         result = _validate_nng_include_dir(path)
         if result:
-            logger.debug("NNG headers found in system path: %s", result)
+            logger.debug("nng headers found in system path: %s", result)
             return result
     return None
 
@@ -212,13 +191,14 @@ def _detect_homebrew() -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if output.returncode == 0:
             prefix = output.stdout.strip()
             include_path = os.path.join(prefix, "include")
             result = _validate_nng_include_dir(include_path)
             if result:
-                logger.debug("NNG headers found via Homebrew: %s", result)
+                logger.debug("nng headers found via Homebrew: %s", result)
                 return result
     except (FileNotFoundError, subprocess.TimeoutExpired):
         logger.debug("brew command not available or timed out")
@@ -228,7 +208,7 @@ def _detect_homebrew() -> str | None:
         include_path = os.path.join(prefix, "include")
         result = _validate_nng_include_dir(include_path)
         if result:
-            logger.debug("NNG headers found in Homebrew prefix: %s", result)
+            logger.debug("nng headers found in Homebrew prefix: %s", result)
             return result
     return None
 
@@ -239,12 +219,12 @@ def _detect_macports() -> str | None:
         return None
     result = _validate_nng_include_dir("/opt/local/include")
     if result:
-        logger.debug("NNG headers found via MacPorts: %s", result)
+        logger.debug("nng headers found via MacPorts: %s", result)
     return result
 
 
 def find_nng_include_dir() -> str | None:
-    """Auto-detect the NNG include directory using a cascade of strategies.
+    """Auto-detect the nng include directory using a cascade of strategies.
 
     Tries the following in order, returning the first valid path found:
       1. NNG_INCLUDE_DIR environment variable
@@ -257,7 +237,7 @@ def find_nng_include_dir() -> str | None:
     Each candidate is validated by checking for the existence of nng/nng.h.
 
     Returns:
-        The path to the NNG include directory, or None if not found.
+        The path to the nng include directory, or None if not found.
     """
     strategies = [
         ("env_var", _detect_env_var),
@@ -271,25 +251,25 @@ def find_nng_include_dir() -> str | None:
         result = strategy()
         if result is not None:
             return result
-        logger.debug("Strategy '%s' did not find NNG headers", name)
-    logger.debug("No NNG headers found by any strategy")
+        logger.debug("Strategy '%s' did not find nng headers", name)
+    logger.debug("No nng headers found by any strategy")
     return None
 
 
 def _get_nng_include_dir() -> str:
-    """Detect the NNG include directory.
+    """Detect the nng include directory.
 
     Uses the auto-detection cascade (env var, build tree, pkg-config,
     system paths, Homebrew, MacPorts).
 
     Raises:
-        RuntimeError: If NNG headers cannot be found by any strategy.
+        RuntimeError: If nng headers cannot be found by any strategy.
     """
     include_dir = find_nng_include_dir()
     if include_dir is None:
         raise RuntimeError(
-            "Cannot find NNG headers. Set NNG_INCLUDE_DIR environment "
-            "variable, install NNG development headers, or build first. "
+            "Cannot find nng headers. Set NNG_INCLUDE_DIR environment "
+            "variable, install nng development headers, or build first. "
             "During cmake builds, NNG_INCLUDE_DIR is set automatically."
         )
     return include_dir
@@ -327,9 +307,10 @@ def _parse_nng_headers(headers=None, include_dir=None):
     aio_mtime = (
         os.path.getmtime(_AIO_ENGINE_H) if os.path.exists(_AIO_ENGINE_H) else 0.0
     )
+    build_mtime = os.path.getmtime(os.path.abspath(__file__))
     parse_key = (
         tuple((h, os.path.getmtime(os.path.join(include_dir, h))) for h in existing)
-        + (("_aio_engine_h", aio_mtime),),
+        + (("_aio_engine_h", aio_mtime), ("_build_pynng_py", build_mtime)),
         include_dir,
     )
     if parse_key in _PARSE_MEMO:
@@ -341,15 +322,16 @@ def _parse_nng_headers(headers=None, include_dir=None):
 #define NNG_DECL
 #define NNG_STATIC_LIB
 #define NNG_DEPRECATED
+#define PYNNG_CFFI_CDEF
 {includes}
-{_AIO_ENGINE_CDEF}
+#include "aio_engine.h"
 """
     backend = get_backend("libclang")
     header = backend.parse(
         umbrella,
         "umbrella.h",
-        include_dirs=[include_dir],
-        project_prefixes=(include_dir,),
+        include_dirs=[include_dir, _SRC_DIR],
+        project_prefixes=(include_dir, _SRC_DIR),
         recursive_includes=False,
     )
     _PARSE_MEMO[parse_key] = (header, list(existing), include_dir)
@@ -386,9 +368,10 @@ def generate_cdef(
     aio_mtime = (
         os.path.getmtime(_AIO_ENGINE_H) if os.path.exists(_AIO_ENGINE_H) else 0.0
     )
+    build_mtime = os.path.getmtime(os.path.abspath(__file__))
     memo_key = (
         tuple((h, os.path.getmtime(p)) for h, p in zip(existing, header_paths))
-        + (("_aio_engine_h", aio_mtime),),
+        + (("_aio_engine_h", aio_mtime), ("_build_pynng_py", build_mtime)),
         include_dir,
         tuple(exclude_patterns),
     )
