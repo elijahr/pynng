@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Generate and install PEP 484 `_nng.pyi` and `_nng_v2.pyi` type stubs into built wheels via `CMakeLists.txt`, and define explicit `__all__` exports on `pynng`, `pynng.nng`, `pynng.v2`, and `pynng.v2.nng`
+- Add inline PEP 484 type annotations across all `pynng` and `pynng.v2` Python modules, ship the PEP 561 `pynng/py.typed` marker in built wheels, and narrow v1/v2 `Socket`, `Context`, `Pipe`, and `Message` return types for `mypy --strict` consumers
+- Generate and install zero-`Any` PEP 484 `_nng.pyi` and `_nng_v2.pyi` type stubs into built wheels via `CMakeLists.txt`, and define explicit `__all__` exports on `pynng`, `pynng.nng`, `pynng.v2`, and `pynng.v2.nng`
 
 ### Changed
 - Migrate `build_pynng.py` to `headerkit~=0.50.0` (`CffiWriter` and `PyiWriter(mode="cffi")`), removing the runtime `headerkit._clang` monkey-patch loader, regex `cdef` post-processing, `_extract_defines()`, dummy enum tag workarounds, and `-Wno-incompatible-pointer-types` compiler flags in `CMakeLists.txt`
